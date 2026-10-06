@@ -1,5 +1,10 @@
 # Better e-Arşiv Fatura
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js Version](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#katkıda-bulunma-ve-pr-istekleri)
+
 Gelir İdaresi Başkanlığı (GİB) e-Arşiv Portalı için geliştirilmiş, hafif, hızlı ve modern bir web arayüzüdür.
 
 GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadeleştirerek kullanıcı dostu ve akıcı bir deneyim sunmayı amaçlar.
@@ -94,6 +99,32 @@ better-earsiv/
 - **Yerel Çalışma:** Bu uygulama yalnızca sizin yerel makinenizde çalışır.
 - **Kimlik Bilgileri Saklanmaz:** GİB kullanıcı kodunuz ve parolanız hiçbir yerel veya uzak veritabanına kaydedilmez. Bilgiler yalnızca ilgili oturum boyunca GİB sunucularıyla güvenli iletişim kurmak amacıyla oturum belleğinde (`sessionStorage`) tutulur.
 - **Resmi İşlem Sorumluluğu:** Canlı (PROD) portalda imzalanan belgeler yasal olarak geçerli e-Arşiv faturalarıdır. İşlem yaparken doğru ortamda olduğunuza dikkat ediniz.
+
+---
+
+## Katkıda Bulunma ve PR İstekleri
+
+Projeye katkıda bulunmak isteyen herkesin Pull Request (PR) ve Issue bildirimleri memnuniyetle karşılanır. Geliştirme sürecinin düzenli ve güvenli ilerlemesi için lütfen aşağıdaki adımları ve kuralları göz önünde bulundurunuz:
+
+### PR Süreci
+1. **Depoyu Çatallayın (Fork):** Projeyi kendi GitHub hesabınıza çatallayın.
+2. **Dal Oluşturun:** Yapacağınız geliştirmeye uygun bir dal (branch) açın:
+   ```bash
+   git checkout -b feature/yeni-ozellik
+   # veya
+   git checkout -b fix/hata-cozumu
+   ```
+3. **Geliştirme ve Test:** Değişikliklerinizi yapın ve projenin derlendiğinden emin olun:
+   ```bash
+   npm run build
+   ```
+4. **Commit:** Sade, anlaşılır ve konvansiyonel commit mesajları kullanın (örn: `feat: ...`, `fix: ...`).
+5. **Pull Request Gönderin:** Değişikliğin neyi amaçladığını ve nasıl test edildiğini açıklayan bir PR oluşturun.
+
+### Dikkat Edilmesi Gerekenler
+- **Kişisel Veri Güvenliği:** PR içeriğinde kesinlikle gerçek TCKN, VKN, kullanıcı adı, parola, gerçek fatura verisi veya kişisel HTML çıktıları bulunmamalıdır.
+- **Minimal Bağımlılık Prensibi:** Projenin temel hedefi hafif ve yalın kalmaktır; gereksiz dış paket eklemelerinden kaçınınız.
+- **Tip Güvenliği:** Hem sunucu hem de istemci tarafındaki TypeScript tip kurallarına uyulmalı ve `npm run build` komutunun sıfır hata ile tamamlanması sağlanmalıdır.
 
 ---
 
