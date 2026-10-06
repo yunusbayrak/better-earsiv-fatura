@@ -107,8 +107,8 @@ better-earsiv/
 Projeye katkıda bulunmak isteyen herkesin Pull Request (PR) ve Issue bildirimleri memnuniyetle karşılanır. Geliştirme sürecinin düzenli ve güvenli ilerlemesi için lütfen aşağıdaki adımları ve kuralları göz önünde bulundurunuz:
 
 ### PR Süreci
-1. **Depoyu Çatallayın (Fork):** Projeyi kendi GitHub hesabınıza çatallayın.
-2. **Dal Oluşturun:** Yapacağınız geliştirmeye uygun bir dal (branch) açın:
+1. **Fork Edin:** Projeyi kendi GitHub hesabınıza fork'layın.
+2. **Branch Oluşturun:** Yapacağınız geliştirmeye uygun yeni bir branch açın:
    ```bash
    git checkout -b feature/yeni-ozellik
    # veya
