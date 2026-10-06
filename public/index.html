@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Better e-Arşiv - Modern Fatura Portalı</title>
+    <!-- Bootstrap 5.3 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bs-primary: #2563eb;
+            --bs-primary-rgb: 37, 99, 235;
+        }
+        body {
+            background-color: #f1f5f9;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            min-height: 100vh;
+            color: #1e293b;
+        }
+        .brand-icon-box {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            border-radius: 9px;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+        }
+        .card-custom {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 14px rgba(0, 0, 0, 0.04);
+            background-color: #ffffff;
+            transition: box-shadow 0.2s ease;
+        }
+        .card-custom:hover {
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.07);
+        }
+        .form-control, .form-select {
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            font-size: 0.92rem;
+            padding: 0.5rem 0.75rem;
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.12);
+        }
+        .form-control-sm, .form-select-sm {
+            padding: 0.35rem 0.6rem;
+            font-size: 0.85rem;
+            border-radius: 6px;
+        }
+        .table th {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            background-color: #f8fafc;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .total-card {
+            background: linear-gradient(135deg, #1e3a8a, #2563eb);
+            color: white;
+            border-radius: 14px;
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.22);
+        }
+        .nav-pills .nav-link {
+            border-radius: 10px;
+            font-size: 0.93rem;
+            color: #475569;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            transition: all 0.2s ease;
+        }
+        .nav-pills .nav-link:hover {
+            background: #f8fafc;
+            color: #1e293b;
+        }
+        .nav-pills .nav-link.active {
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #2563eb;
+            box-shadow: 0 3px 10px rgba(37, 99, 235, 0.25);
+        }
+        .btn {
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.15s ease-in-out;
+        }
+        .preview-iframe {
+            width: 100%;
+            height: 75vh;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            background: white;
+        }
+        .env-badge-test {
+            background-color: #f59e0b;
+            color: #000;
+            font-weight: 600;
+        }
+        .env-badge-prod {
+            background-color: #10b981;
+            color: #fff;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Üst Menü / Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top shadow-sm py-2">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand d-flex align-items-center gap-2 text-decoration-none" href="#">
+                <div class="brand-icon-box d-flex align-items-center justify-content-center">
+                    <i class="bi bi-receipt-cutoff text-white fs-5"></i>
+                </div>
+                <div class="d-flex flex-column lh-1">
+                    <span class="fw-bold fs-5 text-white tracking-tight">Better e-Arşiv</span>
+                    <span class="text-white-50 text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.08em;">Modern Fatura Portalı</span>
+                </div>
+            </a>
+
+            <div class="d-flex align-items-center gap-3 ms-auto">
+                <!-- Ortam Seçici & Göstergesi -->
+                <div class="d-flex align-items-center bg-black bg-opacity-25 px-3 py-1 rounded-pill">
+                    <span class="text-secondary small me-2">Ortam:</span>
+                    <span id="envIndicator" class="badge env-badge-test px-2 py-1">TEST (Test Portalı)</span>
+                </div>
+
+                <!-- Oturum Durumu -->
+                <div id="sessionStatusContainer" class="d-flex align-items-center gap-2">
+                    <button class="btn btn-outline-light btn-sm px-3" data-bs-toggle="modal" data-bs-target="#loginModal">
+                        <i class="bi bi-box-arrow-in-right me-1"></i> GİB Girişi Yap
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Uyarı Şeridi (PROD durumunda gösterilir) -->
+    <div id="prodWarningBanner" class="alert alert-danger rounded-0 border-0 mb-0 py-2 d-none" role="alert">
+        <div class="container-fluid px-4 d-flex align-items-center justify-content-between">
+            <div>
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>DİKKAT: Canlı (PROD) Ortamdasınız!</strong> İmzalanan belgeler mali değeri olan resmi e-Arşiv faturası niteliğindedir.
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-dark" id="btnSwitchToTest">Test Ortamına Geç</button>
+        </div>
+    </div>
+
+    <!-- Ana İçerik Alanı -->
+    <div class="container-fluid px-4 py-4">
+
+        <!-- Oturum Açık Değil Uyarısı -->
+        <div id="notLoggedInAlert" class="alert alert-warning card-custom d-flex align-items-center justify-content-between p-3 mb-4">
+            <div class="d-flex align-items-center gap-3">
+                <i class="bi bi-info-circle-fill fs-3 text-warning"></i>
+                <div>
+                    <h6 class="mb-1 fw-bold">GİB e-Arşiv Oturumu Gerekli</h6>
+                    <p class="mb-0 text-muted small">Fatura oluşturmak veya geçmiş faturaları görüntülemek için GİB kullanıcı kodu ve parolanızla giriş yapmalısınız.</p>
+                </div>
+            </div>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#loginModal">
+                <i class="bi bi-key-fill me-1"></i> Hemen Giriş Yap
+            </button>
+        </div>
+
+        <!-- Ana Sekmeler (Tabs) -->
+        <ul class="nav nav-pills mb-4 gap-2" id="mainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active px-4 py-2 fw-semibold" id="tab-create-btn" data-bs-toggle="pill" data-bs-target="#tab-create" type="button" role="tab">
+                    <i class="bi bi-plus-circle me-1"></i> Yeni Fatura Kes
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link px-4 py-2 fw-semibold" id="tab-list-btn" data-bs-toggle="pill" data-bs-target="#tab-list" type="button" role="tab">
+                    <i class="bi bi-list-ul me-1"></i> Faturalar (Sorgula / İndir)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link px-4 py-2 fw-semibold" id="tab-user-btn" data-bs-toggle="pill" data-bs-target="#tab-user" type="button" role="tab">
+                    <i class="bi bi-person-badge me-1"></i> Mükellef Bilgileri
+                </button>
+            </li>
+            <li class="nav-item ms-auto" role="presentation">
+                <button class="nav-link px-4 py-2 fw-semibold text-danger border border-danger-subtle bg-white" id="tab-logs-btn" data-bs-toggle="pill" data-bs-target="#tab-logs" type="button" role="tab">
+                    <i class="bi bi-terminal me-1"></i> Canlı Sunucu Logları
+                    <span class="badge bg-danger ms-1" id="logCountBadge" style="font-size: 0.7rem;">0</span>
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="mainTabsContent">
+
+            <!-- 1. SEKME: YENİ FATURA OLUŞTUR -->
+            <div class="tab-pane fade show active" id="tab-create" role="tabpanel">
+                <form id="invoiceForm">
+                    <div class="row g-4">
+                        
+                        <!-- Sol Kolon: Alıcı Bilgileri & Fatura Bilgileri -->
+                        <div class="col-lg-8">
+                            
+                            <!-- Alıcı Bilgileri Kartı -->
+                            <div class="card card-custom mb-4">
+                                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-0">
+                                    <h6 class="mb-0 fw-bold text-primary">
+                                        <i class="bi bi-person-vcard me-2"></i>Alıcı Bilgileri
+                                    </h6>
+                                    <div class="btn-group btn-group-sm">
+                                        <button type="button" class="btn btn-outline-primary" id="btnCopyFromPreviousInvoice" title="Önceki faturadan bilgileri bu ekrana kopyalar">
+                                            <i class="bi bi-copy me-1"></i> Önceki Faturadan Kopyala
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" id="btnFillSampleData">
+                                            <i class="bi bi-magic me-1"></i> Örnek Satış (TRY)
+                                        </button>
+                                        <button type="button" class="btn btn-outline-warning text-dark" id="btnFillSampleIstisna">
+                                            <i class="bi bi-globe me-1"></i> Örnek İstisna (USD)
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" id="btnResetForm" title="Formu temizle ve sıfırla">
+                                            <i class="bi bi-arrow-counterclockwise me-1"></i> Temizle
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="card-body pt-0">
+                                    <div class="row g-3">
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-semibold">VKN / TCKN</label>
+                                            <div class="input-group">
+                                                <input type="text" class="form-control" id="taxIDOrTRID" placeholder="11 haneli TCKN veya 10 haneli VKN" required maxlength="11">
+                                                <button class="btn btn-outline-primary" type="button" id="btnFetchRecipient" title="GİB'den Alıcı Bilgilerini Getir">
+                                                    <i class="bi bi-search"></i> Getir
+                                                </button>
+                                            </div>
+                                            <div class="form-text small">11111111111 (Nihai Tüketici) | 2222222222 (Yurtdışı)</div>
+                                        </div>
+                                        <div class="col-md-7">
+                                            <label class="form-label small fw-semibold">Ünvan / Firma Adı</label>
+                                            <input type="text" class="form-control" id="title" placeholder="Firma Ünvanı (Şirket ise)">
+                                        </div>
+
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-semibold">Alıcı Adı</label>
+                                            <input type="text" class="form-control" id="name" placeholder="Şahıs ise adı">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-semibold">Alıcı Soyadı</label>
+                                            <input type="text" class="form-control" id="surname" placeholder="Şahıs ise soyadı">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-semibold">Vergi Dairesi</label>
+                                            <input type="text" class="form-control" id="taxOffice" placeholder="Örn: Beylikdüzü">
+                                        </div>
+
+                                        <div class="col-md-8">
+                                            <label class="form-label small fw-semibold">Adres (Bulvar / Cadde / Sokak / No)</label>
+                                            <input type="text" class="form-control" id="fullAddress" placeholder="Adres bilgisi" required>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-semibold">Ülke</label>
+                                            <input type="text" class="form-control" id="country" value="Türkiye" placeholder="Türkiye">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fatura Detayları & Tarih -->
+                            <div class="card card-custom mb-4">
+                                <div class="card-header bg-white py-3 border-0">
+                                    <h6 class="mb-0 fw-bold text-primary">
+                                        <i class="bi bi-calendar-event me-2"></i>Fatura Türü, Tarihi ve Para Birimi
+                                    </h6>
+                                </div>
+                                <div class="card-body pt-0">
+                                    <div class="row g-3">
+                                        <div class="col-md-3">
+                                            <label class="form-label small fw-semibold">Fatura Tipi</label>
+                                            <select class="form-select" id="invoiceType">
+                                                <option value="SATIS" selected>SATIS - Satış</option>
+                                                <option value="ISTISNA">ISTISNA - İstisna</option>
+                                                <option value="IADE">IADE - İade</option>
+                                                <option value="TEVKIFAT">TEVKIFAT - Tevkifat</option>
+                                                <option value="OZELMATRAH">OZELMATRAH - Özel Matrah</option>
+                                                <option value="IHRACKAYITLI">IHRACKAYITLI - İhraç Kayıtlı</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small fw-semibold">Fatura Tarihi</label>
+                                            <input type="date" class="form-control" id="invoiceDate" required>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small fw-semibold">Fatura Saati</label>
+                                            <input type="time" step="1" class="form-control" id="invoiceTime" required>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small fw-semibold">Para Birimi</label>
+                                            <select class="form-select" id="currency">
+                                                <option value="TRY" selected>TRY - Türk Lirası</option>
+                                                <option value="USD">USD - Dolar ($)</option>
+                                                <option value="EUR">EUR - Euro (€)</option>
+                                                <option value="GBP">GBP - Sterlin (£)</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-2 d-none" id="currencyRateGroup">
+                                            <label class="form-label small fw-semibold text-danger">Döviz Kuru (₺)</label>
+                                            <input type="number" step="0.0001" min="0" class="form-control border-danger" id="currencyRate" placeholder="Örn: 49.00">
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label small fw-semibold">Fatura Notu <span class="text-muted fw-normal">(İsteğe Bağlı)</span></label>
+                                            <input type="text" class="form-control form-control-sm" id="invoiceNote" placeholder="Örn: 10 gün içinde ödenmelidir veya banka IBAN bilgisi (Boş bırakılırsa GİB'e not alanı gönderilmez)">
+                                        </div>
+                                    </div>
+                                    <!-- İstisna Bilgilendirme Notu -->
+                                    <div id="istisnaNotice" class="alert alert-info py-2 px-3 small mt-3 mb-0 d-none">
+                                        <i class="bi bi-info-circle-fill me-1"></i>
+                                        <strong>İstisna Faturası:</strong> Yurtdışı hizmet/mal ihracı veya KDV istisnası kapsamındaki işlemler içindir. Fatura kalemlerinde KDV oranı genellikle <strong>%0</strong> olarak uygulanır.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fatura Satırları (Kalemler) -->
+                            <div class="card card-custom mb-4">
+                                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-0">
+                                    <h6 class="mb-0 fw-bold text-primary">
+                                        <i class="bi bi-card-checklist me-2"></i>Mal ve Hizmet Kalemleri
+                                    </h6>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" id="btnAddItem">
+                                        <i class="bi bi-plus-lg me-1"></i> Yeni Satır Ekle
+                                    </button>
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table align-middle mb-0" id="itemsTable">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width: 32%;">Mal / Hizmet</th>
+                                                    <th style="width: 12%;">Miktar</th>
+                                                    <th style="width: 14%;">Birim</th>
+                                                    <th style="width: 16%;">Birim Fiyat</th>
+                                                    <th style="width: 12%;">KDV %</th>
+                                                    <th style="width: 14%;" class="text-end">Tutar</th>
+                                                    <th style="width: 5%;"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="itemsTableBody">
+                                                <!-- JavaScript dinamik satırlar ekleyecek -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <!-- Sağ Kolon: Fatura Özeti & İşlemler -->
+                        <div class="col-lg-4">
+                            <div class="card card-custom total-card p-4 mb-4 shadow">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="fw-bold mb-0 d-flex align-items-center gap-2">
+                                        <i class="bi bi-calculator"></i> Tutar Özeti
+                                    </h5>
+                                    <span id="summaryCurrencyBadge" class="badge bg-white text-primary px-2 py-1 fw-bold">TRY (₺)</span>
+                                </div>
+                                <div class="d-flex justify-content-between py-2 border-bottom border-light border-opacity-25">
+                                    <span>Matrah (Ara Toplam):</span>
+                                    <strong id="summarySubtotal">0,00 TL</strong>
+                                </div>
+                                <div class="d-flex justify-content-between py-2 border-bottom border-light border-opacity-25">
+                                    <span>Hesaplanan KDV:</span>
+                                    <strong id="summaryTotalVat">0,00 TL</strong>
+                                </div>
+                                <div class="d-flex justify-content-between py-3 fs-5">
+                                    <span>Ödenecek Tutar:</span>
+                                    <strong id="summaryGrandTotal" class="text-warning">0,00 TL</strong>
+                                </div>
+                                <div class="small text-white-50 mt-1">
+                                    Yalnızca: <span id="summaryPriceText" class="text-white fw-semibold">-</span>
+                                </div>
+                            </div>
+
+                            <!-- Aksiyon Butonları -->
+                            <div class="card card-custom p-3">
+                                <h6 class="fw-bold mb-3 text-secondary">İşlemler</h6>
+                                <div class="d-grid gap-2">
+                                    <button type="button" class="btn btn-success btn-lg fw-semibold" id="btnCreateAndSign">
+                                        <i class="bi bi-check2-circle me-1"></i> Fatura Kes ve İmzala
+                                    </button>
+                                    <button type="button" class="btn btn-outline-primary" id="btnCreateDraft">
+                                        <i class="bi bi-file-earmark-plus me-1"></i> Yalnızca Taslak Oluştur
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" id="btnPreviewInvoice">
+                                        <i class="bi bi-eye me-1"></i> HTML Önizle
+                                    </button>
+                                </div>
+                                <div class="form-text text-muted small mt-3">
+                                    <i class="bi bi-shield-check me-1"></i>
+                                    "Taslak Oluştur" seçeneği mali işlem doğurmaz, GİB portalında taslak olarak saklar.
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </form>
+            </div>
+
+            <!-- 2. SEKME: FATURALAR LİSTESİ -->
+            <div class="tab-pane fade" id="tab-list" role="tabpanel">
+                <div class="card card-custom mb-4">
+                    <div class="card-body">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label small fw-semibold">Başlangıç Tarihi</label>
+                                <input type="date" class="form-control" id="filterStartDate">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small fw-semibold">Bitiş Tarihi</label>
+                                <input type="date" class="form-control" id="filterEndDate">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small fw-semibold">Fatura Türü</label>
+                                <select class="form-select" id="filterType">
+                                    <option value="outgoing" selected>Düzenlediğim Faturalar (Giden)</option>
+                                    <option value="incoming">Adıma Düzenlenen Faturalar (Gelen)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 d-flex flex-wrap gap-2">
+                                <button class="btn btn-primary flex-grow-1" id="btnListInvoices">
+                                    <i class="bi bi-arrow-clockwise me-1"></i> Listele
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" id="btnQuickDateToday" title="Bugünü Seç">
+                                    Bugün
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" id="btnQuickDate7Days" title="Son 7 Günü Seç">
+                                    7 Gün
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" id="btnQuickDateThisMonth" title="Bu Ayın Başından İtibaren Seç">
+                                    Bu Ay
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fatura Listesi Tablosu -->
+                <div class="card card-custom">
+                    <div class="card-header bg-white py-3 border-0 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <h6 class="mb-0 fw-bold text-primary">
+                                <i class="bi bi-receipt me-2"></i>Fatura Listesi
+                            </h6>
+                            <span id="invoiceCountBadge" class="badge bg-secondary">0 fatura</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2" style="max-width: 280px; width: 100%;">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-light border-end-0"><i class="bi bi-search text-muted"></i></span>
+                                <input type="text" class="form-control border-start-0" id="invoiceSearchInput" placeholder="Listede ara (Alıcı, No)...">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Belge No / ETTN</th>
+                                        <th>Tarih</th>
+                                        <th>Alıcı / VKN</th>
+                                        <th>Belge Türü</th>
+                                        <th>Onay Durumu</th>
+                                        <th class="text-end">İşlemler</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoicesTableBody">
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4 text-muted">
+                                            <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+                                            Görüntülemek için tarih aralığı seçip "Faturaları Listele" butonuna tıklayınız.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. SEKME: MÜKELLEF PROFİLİ -->
+            <div class="tab-pane fade" id="tab-user" role="tabpanel">
+                <div class="card card-custom col-lg-8 mx-auto">
+                    <div class="card-header bg-white py-3 border-0 d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 fw-bold text-primary">
+                            <i class="bi bi-building me-2"></i>GİB Portal Mükellef Bilgileri
+                        </h6>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="btnRefreshUserData" title="Mükellef verilerini GİB'den yeniden çeker">
+                            <i class="bi bi-arrow-clockwise me-1"></i> Bilgileri Yenile
+                        </button>
+                    </div>
+                    <div class="card-body" id="userDataContainer">
+                        <p class="text-muted">Profil bilgilerini görüntülemek için giriş yapınız.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. SEKME: CANLI SUNUCU LOGLARI -->
+            <div class="tab-pane fade" id="tab-logs" role="tabpanel">
+                <div class="card card-custom">
+                    <div class="card-header bg-dark text-white py-3 d-flex justify-content-between align-items-center border-0">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-terminal-fill text-danger fs-5"></i>
+                            <div>
+                                <h6 class="mb-0 fw-bold">Canlı Sunucu & GİB İstek Logları</h6>
+                                <small class="text-white-50">Tüm HTTP ve GİB API aksiyonları anlık olarak listelenir</small>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="form-check form-switch text-light me-2">
+                                <input class="form-check-input" type="checkbox" role="switch" id="autoScrollLogs" checked>
+                                <label class="form-check-label small" for="autoScrollLogs">Oto-kaydır</label>
+                            </div>
+                            <button type="button" class="btn btn-outline-light btn-sm" id="btnClearLogs">
+                                <i class="bi bi-trash me-1"></i> Logları Temizle
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-0 bg-black text-light font-monospace" style="min-height: 480px; max-height: 600px; overflow-y: auto;" id="logsContainer">
+                        <div class="p-3 text-secondary small text-center" id="emptyLogsPlaceholder">
+                            Henüz kayıtlı log bulunmuyor. Bir işlem yaptığınızda burada anında görünecektir.
+                        </div>
+                        <div id="logsList" class="p-3 small" style="white-space: pre-wrap; word-break: break-all;"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Giriş Modalı (Login Modal) -->
+    <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold" id="loginModalLabel">
+                        <i class="bi bi-shield-lock me-2"></i>GİB e-Arşiv Girişi
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="loginForm">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Çalışma Ortamı</label>
+                            <select class="form-select" id="loginEnv">
+                                <option value="TEST" selected>🧪 TEST Ortamı (earsivportaltest.efatura.gov.tr)</option>
+                                <option value="PROD">🚀 CANLI Ortam (earsivportal.efatura.gov.tr)</option>
+                            </select>
+                            <div class="form-text small">Test portalında test kullanıcı bilgileriyle güvenle deneme yapabilirsiniz.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Kullanıcı Kodu</label>
+                            <input type="text" class="form-control" id="loginUsername" placeholder="GİB Kullanıcı Kodu" required>
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Parola</label>
+                            <input type="password" class="form-control" id="loginPassword" placeholder="GİB Şifresi" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg" id="btnLoginSubmit">
+                                <span id="loginSpinner" class="spinner-border spinner-border-sm d-none me-2"></span>
+                                Giriş Yap ve Oturumu Başlat
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fatura Önizleme Modalı -->
+    <div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header py-2 bg-light">
+                    <h6 class="modal-title fw-bold" id="previewModalTitle">
+                        <i class="bi bi-file-earmark-text me-2"></i>Fatura Önizleme
+                    </h6>
+                    <div class="d-flex gap-2 ms-auto me-2">
+                        <button type="button" class="btn btn-outline-success btn-sm" id="btnCloneFromPreview" title="Bu faturayı yeni fatura olarak kopyala">
+                            <i class="bi bi-copy me-1"></i> Yeni Fatura Olarak Kopyala
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnPrintPreview">
+                            <i class="bi bi-printer me-1"></i> Yazdır
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="btnDownloadFromPreview">
+                            <i class="bi bi-download me-1"></i> İndir (.ZIP)
+                        </button>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <iframe id="previewIframe" class="preview-iframe"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Taslak İptal Modalı -->
+    <div class="modal fade" id="cancelModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title fw-bold">
+                        <i class="bi bi-x-circle me-2"></i>Taslak Faturayı İptal Et
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="mb-3">Bu taslak faturayı iptal etmek istediğinize emin misiniz?</p>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">İptal Gerekçesi</label>
+                        <input type="text" class="form-control" id="cancelReasonInput" placeholder="Örn: Yanlış tutar girildi" required>
+                    </div>
+                    <div class="d-grid">
+                        <button type="button" class="btn btn-danger" id="btnConfirmCancel">
+                            İptali Onayla
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JSON Veri Modalı (Fatura Detayı) -->
+    <div class="modal fade" id="jsonModal" tabindex="-1" aria-labelledby="jsonModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title font-monospace small" id="jsonModalLabel">
+                        <i class="bi bi-code-slash me-2 text-info"></i>GİB Fatura Ham Verisi (JSON)
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+                </div>
+                <div class="modal-body p-3 bg-light">
+                    <pre class="bg-white p-3 rounded border font-monospace small mb-0" id="jsonModalContent" style="max-height: 450px; overflow-y: auto;"></pre>
+                </div>
+                <div class="modal-footer bg-white border-top-0 py-2 justify-content-between">
+                    <button type="button" class="btn btn-primary btn-sm" id="btnCloneFromJsonModal">
+                        <i class="bi bi-copy me-1"></i> Yeni Fatura Olarak Forma Aktar
+                    </button>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCopyJson">
+                            <i class="bi bi-clipboard me-1"></i> JSON Kopyala
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Kapat</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Taslak Belge Bilgi Modalı -->
+    <div class="modal fade" id="draftDetailModal" tabindex="-1" aria-labelledby="draftDetailModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title fw-bold" id="draftDetailModalLabel">
+                        <i class="bi bi-file-earmark-text me-2"></i>Taslak Belge Bilgileri
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+                </div>
+                <div class="modal-body p-4" id="draftDetailModalContent">
+                    <!-- Dinamik doldurulacak -->
+                </div>
+                <div class="modal-footer bg-light py-2 justify-content-between">
+                    <button type="button" class="btn btn-primary btn-sm" id="btnCloneFromDraftModal">
+                        <i class="bi bi-copy me-1"></i> Yeni Fatura Olarak Kopyala
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Bildirim Alanı -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="liveToast" class="toast align-items-center text-white border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body" id="toastMessage"></div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Kapat"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5.3 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Frontend TypeScript Compiled Script -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>

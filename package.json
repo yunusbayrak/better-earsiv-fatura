@@ -1,0 +1,17 @@
+{
+  "name": "better-earsiv",
+  "version": "1.0.0",
+  "description": "GİB e-Arşiv Fatura Portalı Basit ve Modern Arayüzü",
+  "type": "module",
+  "scripts": {
+    "build:client": "tsc -p tsconfig.client.json",
+    "build:server": "tsc -p tsconfig.json",
+    "build": "npm run build:client && npm run build:server",
+    "start": "node dist/server.js",
+    "dev": "npm run build:client && node dist/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  }
+}
