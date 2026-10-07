@@ -24,20 +24,27 @@ GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadele
 - **Canlı Tutar ve Kur Hesaplama:** Toplam matrah, hesaplanan KDV, genel toplam ve dövizli faturalarda TL karşılığı anlık olarak güncellenir.
 - **Yazıyla Tutar:** Ödenecek tutar seçilen para birimine göre (TRY, USD, EUR, GBP) otomatik olarak Türkçe yazıya dökülür.
 - **Hazır Şablonlar:** Test amaçlı örnek satış veya ihracat istisnası kalemlerini tek tıkla doldurma imkanı.
+- **Fatura Klonlama:** Önizlenen veya listedeki bir faturayı tek tıkla form alanlarına kopyalayarak yeni fatura oluşturabilme.
 
-### Belge İşlemleri
-- **Taslak Kaydetme:** Resmi maliyet veya sorumluluk doğurmadan taslak olarak kaydetme.
-- **Doğrudan İmzalama:** Taslağı oluşturup onay koduna gerek kalmadan portal oturumuyla imzalama.
-- **HTML Önizleme ve Yazdırma:** GİB resmi şablonuyla fatura çıktısını tarayıcıda görüntüleme ve yazdırma.
-- **ZIP İndirme:** Faturayı resmi formatında indirip arşivleme.
-- **Geçmiş Faturaları Listeleme:** Belirlenen tarih aralığına göre giden veya adınıza kesilmiş gelen faturaları filtreleme ve sorgulama.
+### Belge ve İndirme İşlemleri
+- **Doğrudan PDF İndirme:** Faturayı resmi A4 formatında PDF olarak indirme. Ağır dış paketler (Puppeteer vb.) gerektirmeden sisteminizdeki yerel tarayıcı (Edge, Chrome, Brave veya Chromium) üzerinden hafif ve hızlı dönüşüm sağlar.
+- **ZIP İndirme:** Faturayı GİB'in resmi ZIP formatında indirip arşivleme.
+- **HTML Önizleme ve Yazdırma:** GİB resmi şablonuyla fatura çıktısını modal içerisinde görüntüleme veya ayrı sekmede açarak yazdırma.
+- **Taslak Kaydetme ve İmzalama:** Resmi maliyet doğurmadan taslak oluşturma veya portal oturumuyla doğrudan imzalama.
 - **Taslak İptali:** İptal gerekçesi girerek onaylanmamış taslakları portaldan silebilme.
+
+### Sorgulama ve Dışa Aktarma
+- **Geçmiş Faturaları Listeleme:** Belirlenen tarih aralığına göre hem giden faturaları hem de adınıza düzenlenen (gelen) faturaları sorgulama.
+- **Hızlı Tarih Filtreleri:** "Bugün" ve "Dün" butonları ile tek tıkla filtreleme.
+- **CSV Dışa Aktarma:** Listelenen faturaları Excel uyumlu CSV dosyası olarak dışa aktarma.
+- **Mükellef Bilgileri:** Oturum açılan kullanıcının profil bilgilerini ve kullanıcı kodunu görüntüleme.
 
 ### Canlı Sunucu Günlüğü (Logs)
 - GİB API istekleri, yanıtları ve olası hata mesajları Server-Sent Events (SSE) ile anlık olarak arayüzdeki terminal panelinde izlenebilir.
 
 ### Minimal Bağımlılık ve Tip Güvenliği
 - Ağır önyüz framework'leri veya karmaşık derleyiciler gerektirmez.
+- Sıfır çalışma zamanı (runtime) bağımlılığı: Harici npm bağımlılıkları olmadan yerleşik Node.js API'leri ile çalışır.
 - Hem sunucu hem de istemci tarafı baştan sona TypeScript ile yazılmıştır.
 
 ---
@@ -47,6 +54,7 @@ GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadele
 ### Gereksinimler
 - Node.js (v18 veya üzeri)
 - npm
+- PDF oluşturma özelliği için sistemde Chromium tabanlı bir tarayıcı (Microsoft Edge, Google Chrome, Brave vb. — Windows ve macOS sistemlerde varsayılan olarak mevcuttur)
 
 ### 1. Bağımlılıkları Yükleyin
 ```bash
@@ -81,7 +89,8 @@ npm run dev
 better-earsiv/
 ├── src/
 │   ├── server.ts         # Yerel Node.js HTTP sunucusu ve API rotaları
-│   └── gibClient.ts      # GİB e-Arşiv servisleri ile doğrudan haberleşen API istemcisi
+│   ├── gibClient.ts      # GİB e-Arşiv servisleri ile doğrudan haberleşen API istemcisi
+│   └── pdfUtil.ts        # Yerel tarayıcı tabanlı hafif HTML->PDF dönüştürücü
 ├── public/
 │   ├── index.html        # Bootstrap 5 tabanlı arayüz
 │   ├── app.ts            # İstemci durumu ve kullanıcı etkileşimleri (TypeScript)

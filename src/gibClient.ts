@@ -28,6 +28,7 @@ export interface InvoiceListItem {
 }
 
 export interface UserProfileData {
+    userCode?: string;
     taxIDOrTRID?: string;
     title?: string;
     name?: string;
@@ -89,9 +90,9 @@ export class GibClient {
         this.baseURL = BASE_URLS[env] || BASE_URLS.PROD;
     }
 
-    private buildHeaders(): Record<string, string> {
-        return {
-            accept: "*/*",
+    private buildHeaders(token?: string): Record<string, string> {
+        const headers: Record<string, string> = {
+            accept: "application/json, text/javascript, */*; q=0.01",
             "accept-language": "tr,en-US;q=0.9,en;q=0.8",
             "cache-control": "no-cache",
             "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
@@ -99,6 +100,10 @@ export class GibClient {
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-origin",
         };
+        if (token) {
+            headers["Referer"] = `${this.baseURL}/index.jsp?token=${encodeURIComponent(token)}`;
+        }
+        return headers;
     }
 
     /** earsiv-services/dispatch üzerinden standart komut çalıştırır */
@@ -113,7 +118,7 @@ export class GibClient {
 
         const response = await fetch(`${this.baseURL}/earsiv-services/dispatch`, {
             method: "POST",
-            headers: this.buildHeaders(),
+            headers: this.buildHeaders(token),
             body: bodyStr,
         });
 
@@ -184,7 +189,7 @@ export class GibClient {
             token,
             "EARSIV_PORTAL_ADIMA_KESILEN_BELGELERI_GETIR",
             "RG_ALICI_TASLAKLAR",
-            { baslangic: startDate, bitis: endDate, hangiTip: "5000/30000", table: [] }
+            { baslangic: startDate, bitis: endDate, hourlySearchInterval: "NONE" }
         );
         return Array.isArray(res.data) ? res.data : [];
     }
@@ -244,6 +249,7 @@ export class GibClient {
         );
         const d = (res.data || {}) as Record<string, string | undefined>;
         return {
+            userCode: d.kullaniciKodu || d.username || d.kodu,
             taxIDOrTRID: d.vknTckn,
             title: d.unvan,
             name: d.ad,

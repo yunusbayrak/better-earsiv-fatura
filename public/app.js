@@ -3,13 +3,17 @@ const state = {
     token: sessionStorage.getItem("gib_token") || null,
     env: sessionStorage.getItem("gib_env") || "TEST",
     username: sessionStorage.getItem("gib_username") || null,
+    userCode: sessionStorage.getItem("gib_user_code") || localStorage.getItem("gib_user_code") || null,
     items: [],
     invoices: [],
     selectedDraftForCancel: null,
     currentPreviewUuid: null,
     currentPreviewSigned: false,
+    currentPreviewHtml: null,
+    currentPreviewBelgeNo: null,
     currentJsonModalData: null,
     currentDraftDetailItem: null,
+    invoiceStatusFilter: "all",
 };
 // Sayıdan Para Birimi Metnine Çevirici (Örn: BeşBinYüz ABD Doları / Bin Türk Lirası)
 function numberToTurkishText(amount, currency) {
@@ -89,13 +93,41 @@ function showToast(message, type = "info") {
     const toastBody = document.getElementById("toastMessage");
     if (!toastEl || !toastBody)
         return;
-    toastEl.className = `toast align-items-center text-white border-0 bg-${type}`;
-    toastBody.innerText = message;
+    const icons = {
+        success: `<i class="bi bi-check-circle-fill text-white fs-5"></i>`,
+        danger: `<i class="bi bi-exclamation-triangle-fill text-white fs-5"></i>`,
+        warning: `<i class="bi bi-exclamation-circle-fill text-white fs-5"></i>`,
+        info: `<i class="bi bi-info-circle-fill text-white fs-5"></i>`,
+    };
+    toastEl.className = `toast align-items-center text-white border-0 bg-${type} toast-custom`;
+    toastBody.innerHTML = `
+        <div class="d-flex align-items-center gap-2">
+            ${icons[type] || icons.info}
+            <div class="fw-medium small">${message}</div>
+        </div>
+    `;
     const toast = new bootstrap.Toast(toastEl);
     toast.show();
 }
-// Tarih ve saat ilklendirme (Bugün ve Son 5-7 gün filtresi)
-function initDateFields() {
+// Hızlı Tarih Butonu Vurgulayıcı
+function setQuickDateActiveButton(activeBtnId) {
+    const group = document.getElementById("quickDateGroup");
+    if (!group)
+        return;
+    const buttons = group.querySelectorAll("button");
+    buttons.forEach((btn) => {
+        if (activeBtnId && btn.id === activeBtnId) {
+            btn.classList.add("active", "btn-primary");
+            btn.classList.remove("btn-outline-secondary");
+        }
+        else {
+            btn.classList.remove("active", "btn-primary");
+            btn.classList.add("btn-outline-secondary");
+        }
+    });
+}
+// Tarih ve saat ilklendirme (Bugün ve Son 7 gün filtresi)
+function initDateFields(forceReset = false) {
     const dateInput = document.getElementById("invoiceDate");
     const timeInput = document.getElementById("invoiceTime");
     const filterStart = document.getElementById("filterStartDate");
@@ -104,17 +136,106 @@ function initDateFields() {
     const pad = (n) => n.toString().padStart(2, "0");
     const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-    // 5 gün öncesini hesaplayalım (Örn: 2026-10-06 için 2026-10-01)
-    const past5 = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
-    const startStr = `${past5.getFullYear()}-${pad(past5.getMonth() + 1)}-${pad(past5.getDate())}`;
-    if (dateInput && !dateInput.value)
+    // Son 7 gün (Bugün dahil 7 günlük pencere)
+    const past7 = new Date(now);
+    past7.setDate(past7.getDate() - 6);
+    const startStr = `${past7.getFullYear()}-${pad(past7.getMonth() + 1)}-${pad(past7.getDate())}`;
+    if (dateInput && (!dateInput.value || forceReset))
         dateInput.value = dateStr;
-    if (timeInput && !timeInput.value)
+    if (timeInput && (!timeInput.value || forceReset))
         timeInput.value = timeStr;
-    if (filterStart && !filterStart.value)
+    if (filterStart && (!filterStart.value || forceReset))
         filterStart.value = startStr;
-    if (filterEnd && !filterEnd.value)
+    if (filterEnd && (!filterEnd.value || forceReset))
         filterEnd.value = dateStr;
+    syncDateInputsConstraint();
+    setQuickDateActiveButton("btnQuickDate7Days");
+}
+// Tarih Seçim Kısıtlaması & Başlangıca Göre Bitiş Tarihini Otomatik Ayarlama (Maksimum 7 Gün)
+function syncDateInputsConstraint(changedField) {
+    const startInput = document.getElementById("filterStartDate");
+    const endInput = document.getElementById("filterEndDate");
+    if (!startInput || !endInput)
+        return;
+    const pad = (n) => n.toString().padStart(2, "0");
+    const formatDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (changedField === "start" && startInput.value) {
+        // Kullanıcı başlangıç tarihini seçtiğinde:
+        const [sy, sm, sd] = startInput.value.split("-").map(Number);
+        const sDate = new Date(sy, sm - 1, sd);
+        const maxEndDate = new Date(sDate);
+        maxEndDate.setDate(maxEndDate.getDate() + 6); // Başlangıç dahil 7 takvim günü
+        const maxEndStr = formatDate(maxEndDate);
+        endInput.min = startInput.value;
+        endInput.max = maxEndStr;
+        // Bitiş tarihi boşsa, başlangıçtan önceyse veya 7 günü aşıyorsa otomatik olarak maxEndDate seç
+        if (!endInput.value || endInput.value < startInput.value || endInput.value > maxEndStr) {
+            endInput.value = maxEndStr;
+        }
+    }
+    else if (changedField === "end" && endInput.value) {
+        // Kullanıcı bitiş tarihini seçtiğinde:
+        const [ey, em, ed] = endInput.value.split("-").map(Number);
+        const eDate = new Date(ey, em - 1, ed);
+        const minStartDate = new Date(eDate);
+        minStartDate.setDate(minStartDate.getDate() - 6); // Bitiş dahil 7 gün öncesi
+        const minStartStr = formatDate(minStartDate);
+        startInput.min = minStartStr;
+        startInput.max = endInput.value;
+        // Başlangıç tarihi boşsa, bitişten sonraysa veya 7 günden eskiyse otomatik olarak minStartDate seç
+        if (!startInput.value || startInput.value > endInput.value || startInput.value < minStartStr) {
+            startInput.value = minStartStr;
+        }
+    }
+    else if (startInput.value && endInput.value) {
+        // İlk yükleme veya doğrudan senkronizasyon
+        const [sy, sm, sd] = startInput.value.split("-").map(Number);
+        const sDate = new Date(sy, sm - 1, sd);
+        const maxEndDate = new Date(sDate);
+        maxEndDate.setDate(maxEndDate.getDate() + 6);
+        endInput.min = startInput.value;
+        endInput.max = formatDate(maxEndDate);
+        startInput.max = endInput.value;
+    }
+}
+// Hızlı Tarih Filtresi Uygula (En Fazla 7 Günlük Aralıklar)
+function applyQuickDateFilter(type, activeBtnId) {
+    const startInput = document.getElementById("filterStartDate");
+    const endInput = document.getElementById("filterEndDate");
+    if (!startInput || !endInput)
+        return;
+    const pad = (n) => n.toString().padStart(2, "0");
+    const formatDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const now = new Date();
+    let startDateStr = "";
+    let endDateStr = formatDate(now);
+    if (type === "today") {
+        startDateStr = formatDate(now);
+        endDateStr = formatDate(now);
+    }
+    else if (type === "yesterday") {
+        const yest = new Date();
+        yest.setDate(yest.getDate() - 1);
+        startDateStr = formatDate(yest);
+        endDateStr = formatDate(yest);
+    }
+    else if (type === 3) {
+        const past3 = new Date();
+        past3.setDate(past3.getDate() - 2);
+        startDateStr = formatDate(past3);
+        endDateStr = formatDate(now);
+    }
+    else if (type === 7) {
+        const past7 = new Date();
+        past7.setDate(past7.getDate() - 6);
+        startDateStr = formatDate(past7);
+        endDateStr = formatDate(now);
+    }
+    startInput.value = startDateStr;
+    endInput.value = endDateStr;
+    syncDateInputsConstraint();
+    setQuickDateActiveButton(activeBtnId);
+    handleListInvoices();
 }
 // Oturum Durumunu Güncelle (Navbar ve Kartlar)
 function updateSessionUI() {
@@ -138,9 +259,17 @@ function updateSessionUI() {
     }
     if (sessionContainer) {
         if (state.token) {
+            const code = state.userCode || sessionStorage.getItem("gib_user_code") || localStorage.getItem("gib_user_code");
+            const displayName = state.username || code || "Kullanıcı";
+            const showUserCodeBadge = Boolean(code && displayName && displayName !== code);
             sessionContainer.innerHTML = `
-                <span class="text-light small me-2"><i class="bi bi-person-circle me-1"></i>${state.username || "Kullanıcı"}</span>
-                <span class="badge bg-success me-2">Oturum Açık</span>
+                <span class="text-light small me-2">
+                    <i class="bi bi-person-circle me-1"></i>${displayName}
+                    ${showUserCodeBadge ? `<span class="badge bg-light bg-opacity-25 text-white font-monospace ms-1" title="Kullanıcı Kodu">Kod: ${code}</span>` : ""}
+                </span>
+                <span class="badge bg-success me-2 d-inline-flex align-items-center gap-1">
+                    <span class="live-dot"></span> Oturum Açık
+                </span>
                 <button class="btn btn-outline-danger btn-sm" id="btnLogout">
                     <i class="bi bi-box-arrow-right"></i> Çıkış
                 </button>
@@ -455,10 +584,21 @@ async function handleLogin(e) {
         }
         state.token = data.token;
         state.env = env;
+        state.userCode = username;
         state.username = username;
         sessionStorage.setItem("gib_token", data.token);
         sessionStorage.setItem("gib_env", env);
+        sessionStorage.setItem("gib_user_code", username);
         sessionStorage.setItem("gib_username", username);
+        const rememberMe = document.getElementById("rememberMeCheck")?.checked ?? true;
+        if (rememberMe) {
+            localStorage.setItem("gib_user_code", username);
+            localStorage.setItem("gib_last_username", username);
+        }
+        else {
+            localStorage.removeItem("gib_user_code");
+            localStorage.removeItem("gib_last_username");
+        }
         updateSessionUI();
         showToast("GİB Portal oturumu başarıyla açıldı!", "success");
         // Modalı kapat
@@ -543,8 +683,10 @@ async function handleLogout() {
     // 1. Oturum durumunu sıfırla
     state.token = null;
     state.username = null;
+    state.userCode = null;
     sessionStorage.removeItem("gib_token");
     sessionStorage.removeItem("gib_username");
+    sessionStorage.removeItem("gib_user_code");
     // 2. Fatura listesini ve sayacını temizle
     state.invoices = [];
     state.selectedDraftForCancel = null;
@@ -694,7 +836,7 @@ async function handleCreateInvoice(sign) {
     }
 }
 // 5. HTML Önizle (Kaydedilmiş Taslak veya Onaylı Belge)
-async function previewInvoiceHtml(uuid, onayDurumu = "Onaylanmadı") {
+async function previewInvoiceHtml(uuid, onayDurumu = "Onaylanmadı", belgeNo) {
     if (!state.token) {
         showToast("Önizleme için giriş yapmış olmalısınız.", "warning");
         return;
@@ -703,6 +845,22 @@ async function previewInvoiceHtml(uuid, onayDurumu = "Onaylanmadı") {
     const isSigned = onayStr === "Onaylandı";
     state.currentPreviewUuid = uuid;
     state.currentPreviewSigned = isSigned;
+    state.currentPreviewBelgeNo = belgeNo || null;
+    const titleEl = document.getElementById("previewModalTitle");
+    const subTitleEl = document.getElementById("previewModalSubtitle");
+    if (titleEl)
+        titleEl.textContent = `Fatura Önizleme - ${belgeNo || "Taslak"}`;
+    if (subTitleEl)
+        subTitleEl.textContent = `ETTN: ${uuid} (${onayStr})`;
+    const overlay = document.getElementById("previewLoadingOverlay");
+    const overlayText = document.getElementById("previewLoadingText");
+    if (overlay)
+        overlay.classList.remove("d-none");
+    if (overlayText)
+        overlayText.textContent = "Fatura HTML verisi GİB'den alınıyor...";
+    const modalEl = document.getElementById("previewModal");
+    if (modalEl)
+        new bootstrap.Modal(modalEl).show();
     try {
         const res = await fetch("/api/invoices/html", {
             method: "POST",
@@ -717,21 +875,151 @@ async function previewInvoiceHtml(uuid, onayDurumu = "Onaylanmadı") {
         const data = await res.json();
         if (!data.success)
             throw new Error(data.error || "HTML getirilemedi.");
+        state.currentPreviewHtml = data.html;
         const iframe = document.getElementById("previewIframe");
         if (iframe) {
             iframe.srcdoc = data.html;
         }
-        const modalEl = document.getElementById("previewModal");
-        if (modalEl)
-            new bootstrap.Modal(modalEl).show();
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        showToast(`Önizleme: ${msg}`, "warning");
+        showToast(`Önizleme Hatası: ${msg}`, "warning");
         const item = state.invoices.find((i) => (i.ettn || i.uuid) === uuid);
         if (item) {
             showDraftDetailModal(item);
         }
+    }
+    finally {
+        if (overlay)
+            overlay.classList.add("d-none");
+    }
+}
+// Doğrudan PDF İndir (UUID veya Belge No ile)
+async function downloadInvoicePdf(uuid, onayDurumu = "Onaylanmadı", belgeNo) {
+    if (!state.token) {
+        showToast("PDF indirmek için lütfen giriş yapınız.", "warning");
+        return;
+    }
+    const overlay = document.getElementById("previewLoadingOverlay");
+    const overlayText = document.getElementById("previewLoadingText");
+    if (overlay)
+        overlay.classList.remove("d-none");
+    if (overlayText)
+        overlayText.textContent = "Fatura PDF formatına dönüştürülüyor...";
+    showToast("PDF hazırlanıyor, lütfen bekleyin...", "info");
+    try {
+        const query = new URLSearchParams({
+            env: state.env,
+            token: state.token,
+            uuid,
+            signed: onayDurumu === "Onaylandı" ? "true" : "false",
+            onayDurumu,
+            belgeNo: belgeNo || uuid,
+        });
+        const res = await fetch(`/api/invoices/pdf?${query.toString()}`);
+        if (!res.ok) {
+            const errJson = await res.json().catch(() => null);
+            throw new Error(errJson?.error || `HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const filename = `fatura-${belgeNo || uuid}.pdf`;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        showToast(`PDF başarıyla indirildi: ${filename}`, "success");
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        showToast(`PDF İndirme Hatası: ${msg}`, "danger");
+    }
+    finally {
+        if (overlay)
+            overlay.classList.add("d-none");
+    }
+}
+// Önizleme Modalındaki İçeriği Doğrudan PDF İndir
+async function downloadCurrentPreviewPdf() {
+    if (state.currentPreviewUuid && state.token) {
+        await downloadInvoicePdf(state.currentPreviewUuid, state.currentPreviewSigned ? "Onaylandı" : "Onaylanmadı", state.currentPreviewBelgeNo || undefined);
+        return;
+    }
+    // Yerel Taslak Önizlemesi ise (veya henüz kaydedilmemişse)
+    const iframe = document.getElementById("previewIframe");
+    const html = state.currentPreviewHtml || iframe?.srcdoc;
+    if (!html) {
+        showToast("İndirilecek önizleme içeriği bulunamadı.", "warning");
+        return;
+    }
+    const overlay = document.getElementById("previewLoadingOverlay");
+    const overlayText = document.getElementById("previewLoadingText");
+    if (overlay)
+        overlay.classList.remove("d-none");
+    if (overlayText)
+        overlayText.textContent = "Taslak PDF formatına dönüştürülüyor...";
+    showToast("Taslak PDF hazırlanıyor...", "info");
+    try {
+        const res = await fetch("/api/pdf/convert", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                html,
+                filename: "fatura-taslak.pdf",
+            }),
+        });
+        if (!res.ok) {
+            const errJson = await res.json().catch(() => null);
+            throw new Error(errJson?.error || `HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "fatura-taslak.pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        showToast("Taslak PDF başarıyla indirildi!", "success");
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        showToast(`PDF Dönüştürme Hatası: ${msg}`, "danger");
+    }
+    finally {
+        if (overlay)
+            overlay.classList.add("d-none");
+    }
+}
+// Önizlemeyi Yeni Sekmede Aç
+function openPreviewInNewTab() {
+    const iframe = document.getElementById("previewIframe");
+    const html = state.currentPreviewHtml || iframe?.srcdoc;
+    if (!html) {
+        showToast("Önizleme içeriği bulunamadı.", "warning");
+        return;
+    }
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+}
+// Önizleme Modalında Tam Ekran Geçişi
+function toggleFullscreenPreview() {
+    const dialog = document.getElementById("previewModalDialog");
+    const btn = document.getElementById("btnToggleFullscreenPreview");
+    if (!dialog)
+        return;
+    dialog.classList.toggle("modal-fullscreen-preview");
+    const isFullscreen = dialog.classList.contains("modal-fullscreen-preview");
+    if (btn) {
+        btn.innerHTML = isFullscreen
+            ? `<i class="bi bi-fullscreen-exit"></i>`
+            : `<i class="bi bi-arrows-fullscreen"></i>`;
+        btn.title = isFullscreen ? "Normal Boyuta Dön" : "Tam Ekran Yap";
     }
 }
 // 6. Faturaları Listele
@@ -747,13 +1035,31 @@ async function handleListInvoices() {
         showToast("Lütfen tarih aralığı seçiniz.", "warning");
         return;
     }
-    const [sy, sm, sd] = startVal.split("-");
-    const [ey, em, ed] = endVal.split("-");
-    const startDate = `${sd}/${sm}/${sy}`;
-    const endDate = `${ed}/${em}/${ey}`;
+    const [sy, sm, sd] = startVal.split("-").map(Number);
+    const [ey, em, ed] = endVal.split("-").map(Number);
+    const sDate = new Date(sy, sm - 1, sd);
+    const eDate = new Date(ey, em - 1, ed);
+    const dayCount = Math.round((eDate.getTime() - sDate.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    if (dayCount < 1) {
+        showToast("Başlangıç tarihi bitiş tarihinden sonra olamaz.", "warning");
+        return;
+    }
+    if (dayCount > 7) {
+        showToast(`GİB e-Arşiv kuralı gereği tarih aralığı en fazla 7 gün olabilir (Seçilen: ${dayCount} gün). Bitiş tarihi 7 güne sınırlandırıldı.`, "warning");
+        syncDateInputsConstraint("start");
+        return;
+    }
+    const pad = (n) => n.toString().padStart(2, "0");
+    const startDate = `${pad(sd)}/${pad(sm)}/${sy}`;
+    const endDate = `${pad(ed)}/${pad(em)}/${ey}`;
     const btn = document.getElementById("btnListInvoices");
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Listeleniyor...`;
+    const quickGroup = document.getElementById("quickDateGroup");
+    const quickButtons = quickGroup ? quickGroup.querySelectorAll("button") : [];
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Listeleniyor...`;
+    }
+    quickButtons.forEach((b) => (b.disabled = true));
     try {
         const res = await fetch("/api/invoices", {
             method: "POST",
@@ -779,8 +1085,11 @@ async function handleListInvoices() {
         showToast(`Listeleme Hatası: ${msg}`, "danger");
     }
     finally {
-        btn.disabled = false;
-        btn.innerHTML = `<i class="bi bi-arrow-clockwise me-1"></i> Faturaları Listele`;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="bi bi-arrow-clockwise me-1"></i> Faturaları Listele`;
+        }
+        quickButtons.forEach((b) => (b.disabled = false));
     }
 }
 // Fatura Listesi Tablosunu Çiz
@@ -804,17 +1113,68 @@ function renderInvoicesTable() {
     }
     const searchInput = document.getElementById("invoiceSearchInput");
     const query = (searchInput?.value || "").toLowerCase().trim();
-    const filteredInvoices = query
-        ? state.invoices.filter((inv) => {
+    // İstatistikleri hesapla
+    let totalInvoices = state.invoices.length;
+    let signedCount = 0;
+    let draftCount = 0;
+    let totalAmountTRY = 0;
+    state.invoices.forEach((inv) => {
+        const rawOnay = String(inv.onayDurumu || "Taslak").trim().toLowerCase();
+        const isDel = rawOnay === "silinmiş" || rawOnay === "iptal edildi";
+        const isSign = !isDel && (rawOnay === "onaylandı" || rawOnay === "1" || inv.onayDurumu === true);
+        if (isSign)
+            signedCount++;
+        else if (!isDel)
+            draftCount++;
+        const tVal = inv.odenecek ?? inv.toplamTutar ?? inv.faturaTutari ?? inv.odenecekTutar ?? inv.malHizmetToplamTutari ?? inv.tutar;
+        if (typeof tVal === "number") {
+            totalAmountTRY += tVal;
+        }
+        else if (typeof tVal === "string") {
+            const parsed = parseFloat(tVal.replace(/\./g, "").replace(",", "."));
+            if (!isNaN(parsed))
+                totalAmountTRY += parsed;
+        }
+    });
+    const statTotalEl = document.getElementById("statTotalInvoices");
+    const statSignedEl = document.getElementById("statSignedCount");
+    const statDraftEl = document.getElementById("statDraftCount");
+    const statAmountEl = document.getElementById("statTotalAmount");
+    if (statTotalEl)
+        statTotalEl.textContent = String(totalInvoices);
+    if (statSignedEl)
+        statSignedEl.textContent = String(signedCount);
+    if (statDraftEl)
+        statDraftEl.textContent = String(draftCount);
+    if (statAmountEl)
+        statAmountEl.textContent = totalAmountTRY > 0 ? formatMoney(totalAmountTRY, "TRY") : "-";
+    const statusFilter = state.invoiceStatusFilter || "all";
+    const filteredInvoices = state.invoices.filter((inv) => {
+        // Durum Filtresi
+        if (statusFilter !== "all") {
+            const rawOnay = String(inv.onayDurumu || "Taslak").trim().toLowerCase();
+            const isDel = rawOnay === "silinmiş" || rawOnay === "iptal edildi";
+            const isSign = !isDel && (rawOnay === "onaylandı" || rawOnay === "1" || inv.onayDurumu === true);
+            const isDrf = !isDel && !isSign;
+            if (statusFilter === "signed" && !isSign)
+                return false;
+            if (statusFilter === "draft" && !isDrf)
+                return false;
+            if (statusFilter === "deleted" && !isDel)
+                return false;
+        }
+        // Metin Arama Filtresi
+        if (query) {
             const ettn = String(inv.ettn || inv.uuid || "").toLowerCase();
             const belgeNo = String(inv.belgeNumarasi || "").toLowerCase();
             const alici = String(inv.aliciUnvanAdSoyad || inv.aliciUnvan || `${inv.aliciAdi || ""} ${inv.aliciSoyadi || ""}`).toLowerCase();
             const vkn = String(inv.aliciVknTckn || inv.vknTckn || "").toLowerCase();
             return ettn.includes(query) || belgeNo.includes(query) || alici.includes(query) || vkn.includes(query);
-        })
-        : state.invoices;
+        }
+        return true;
+    });
     if (badge) {
-        badge.textContent = query
+        badge.textContent = (query || statusFilter !== "all")
             ? `${filteredInvoices.length} / ${state.invoices.length} fatura`
             : `${state.invoices.length} fatura`;
     }
@@ -849,28 +1209,35 @@ function renderInvoicesTable() {
         // Durum Rozeti
         let statusBadge = "";
         if (isDeleted) {
-            statusBadge = `<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Silinmiş</span>`;
+            statusBadge = `<span class="badge badge-status-deleted"><i class="bi bi-x-circle me-1"></i>Silinmiş</span>`;
         }
         else if (isSigned) {
-            statusBadge = `<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Onaylandı</span>`;
+            statusBadge = `<span class="badge badge-status-signed"><i class="bi bi-check-circle me-1"></i>Onaylandı</span>`;
         }
         else {
-            statusBadge = `<span class="badge bg-warning text-dark"><i class="bi bi-clock-history me-1"></i>Taslak</span>`;
+            statusBadge = `<span class="badge badge-status-draft"><i class="bi bi-clock-history me-1"></i>Taslak</span>`;
         }
         // İşlem Butonları
         let actionButtons = "";
         if (isDeleted) {
-            // Silinmiş belgeler tekrar düzenlenemez veya onaylanamaz
+            // Silinmiş belgeler
             actionButtons = `
-                <button class="btn btn-outline-secondary btn-action-view" data-uuid="${ettn}" data-onay="Silinmiş" title="Görüntüle (HTML)">
+                <button class="btn btn-outline-secondary btn-action-view" data-uuid="${ettn}" data-onay="Silinmiş" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML)">
                     <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn btn-action-pdf" data-uuid="${ettn}" data-onay="Silinmiş" data-belgeno="${rawBelgeNo}" title="Doğrudan PDF İndir">
+                    <i class="bi bi-file-earmark-pdf"></i>
                 </button>
             `;
         }
         else if (isSigned) {
+            // Onaylı (İmzalı) belgeler: Görüntüle, Doğrudan PDF İndir, ZIP İndir
             actionButtons = `
-                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylandı" title="Görüntüle (HTML)">
+                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylandı" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML)">
                     <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn btn-action-pdf" data-uuid="${ettn}" data-onay="Onaylandı" data-belgeno="${rawBelgeNo}" title="Doğrudan PDF İndir">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF
                 </button>
                 <a href="/api/invoices/download?env=${state.env}&token=${state.token}&uuid=${ettn}&signed=true" class="btn btn-outline-secondary" title="ZIP İndir" download>
                     <i class="bi bi-download"></i>
@@ -878,10 +1245,13 @@ function renderInvoicesTable() {
             `;
         }
         else {
-            // Aktif taslak (Onaylanmadı): Görüntülenebilir, onaylanabilir, silinebilir
+            // Aktif taslak (Onaylanmadı): Görüntüle, Doğrudan PDF İndir, Onayla, Sil
             actionButtons = `
-                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylanmadı" title="Görüntüle (HTML)">
+                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylanmadı" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML)">
                     <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn btn-action-pdf" data-uuid="${ettn}" data-onay="Onaylanmadı" data-belgeno="${rawBelgeNo}" title="Doğrudan PDF İndir">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF
                 </button>
                 <button class="btn btn-outline-success btn-action-sign" data-uuid="${ettn}" title="İmzala (Onayla)">
                     <i class="bi bi-check-lg"></i>
@@ -907,9 +1277,13 @@ function renderInvoicesTable() {
                 <div class="d-flex align-items-center gap-2">
                     <span class="badge ${rawBelgeNo ? (isDeleted ? "bg-secondary" : "bg-primary") : (isDeleted ? "bg-light text-muted border" : "bg-secondary text-light")} font-monospace">${belgeNo}</span>
                 </div>
-                <div class="small text-muted font-monospace mt-1 user-select-all" style="font-size: 0.75rem;" title="${ettn}">
-                    ${ettn !== "-" ? ettn : ""}
-                </div>
+                ${ettn && ettn !== "-" ? `
+                <div class="d-flex align-items-center gap-1 mt-1 font-monospace" style="font-size: 0.75rem;">
+                    <span class="text-muted text-truncate user-select-all" style="max-width: 140px;" title="${ettn}">${ettn}</span>
+                    <button type="button" class="btn btn-link p-0 text-secondary btn-copy-ettn" data-copy="${ettn}" title="ETTN Kopyala">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </div>` : ""}
             </td>
             <td>
                 <span class="${isDeleted ? "text-muted" : "fw-semibold"}">${tarih}</span>
@@ -942,12 +1316,30 @@ function renderInvoicesTable() {
             }
         });
     });
-    // 2. HTML Önizle Dinleyicisi (Belgenin Mevcut Onay Durumuyla Çeker, İmzalamaz)
+    // 2. HTML Önizle Dinleyicisi
     tbody.querySelectorAll(".btn-action-view").forEach((el) => {
         el.addEventListener("click", (e) => {
             const btn = e.target.closest(".btn-action-view");
             if (btn && btn.dataset.uuid) {
-                previewInvoiceHtml(btn.dataset.uuid, btn.dataset.onay || "Onaylanmadı");
+                previewInvoiceHtml(btn.dataset.uuid, btn.dataset.onay || "Onaylanmadı", btn.dataset.belgeno);
+            }
+        });
+    });
+    // 2.1 Doğrudan PDF İndir Dinleyicisi
+    tbody.querySelectorAll(".btn-action-pdf").forEach((el) => {
+        el.addEventListener("click", async (e) => {
+            const btn = e.target.closest(".btn-action-pdf");
+            if (!btn || !btn.dataset.uuid)
+                return;
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span>`;
+            try {
+                await downloadInvoicePdf(btn.dataset.uuid, btn.dataset.onay || "Onaylanmadı", btn.dataset.belgeno);
+            }
+            finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
             }
         });
     });
@@ -1014,6 +1406,84 @@ function renderInvoicesTable() {
                 new bootstrap.Modal(modalEl).show();
         });
     });
+    // 6. ETTN Kopyalama Butonu Dinleyicisi
+    tbody.querySelectorAll(".btn-copy-ettn").forEach((el) => {
+        el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const btn = e.target.closest(".btn-copy-ettn");
+            const text = btn?.dataset.copy;
+            if (!text)
+                return;
+            navigator.clipboard.writeText(text).then(() => {
+                const icon = btn.querySelector("i");
+                if (icon) {
+                    icon.className = "bi bi-check2 text-success fw-bold";
+                    setTimeout(() => {
+                        icon.className = "bi bi-clipboard";
+                    }, 1500);
+                }
+                showToast("ETTN panoya kopyalandı!", "success");
+            }).catch(() => {
+                showToast("Panoya kopyalanamadı.", "warning");
+            });
+        });
+    });
+}
+// Faturaları CSV Formatında Dışa Aktar (UTF-8 BOM ile Excel uyumlu)
+function exportInvoicesToCsv() {
+    if (!state.invoices || state.invoices.length === 0) {
+        showToast("Dışa aktarılacak fatura bulunamadı.", "warning");
+        return;
+    }
+    const headers = [
+        "Belge Numarası",
+        "ETTN (UUID)",
+        "Belge Tarihi",
+        "Alıcı Ünvan / Ad Soyad",
+        "Alıcı VKN / TCKN",
+        "Belge Türü",
+        "Onay Durumu",
+        "Ödenecek Tutar"
+    ];
+    const escapeCsv = (str) => {
+        if (str === undefined || str === null)
+            return '""';
+        const s = typeof str === "object" ? JSON.stringify(str) : String(str);
+        return `"${s.replace(/"/g, '""')}"`;
+    };
+    const rows = state.invoices.map((inv) => {
+        const ettn = (inv.ettn || inv.uuid || "");
+        const belgeNo = (inv.belgeNumarasi || "");
+        const tarih = (inv.belgeTarihi || inv.faturaTarihi || inv.date || "");
+        const aliciUnvan = (inv.aliciUnvanAdSoyad || inv.aliciUnvan || `${inv.aliciAdi || ""} ${inv.aliciSoyadi || ""}`.trim());
+        const aliciVkn = (inv.aliciVknTckn || inv.vknTckn || "");
+        const belgeTuru = (inv.belgeTuru || "FATURA");
+        const rawOnay = String(inv.onayDurumu || "Taslak").trim();
+        const tutarVal = inv.odenecek ?? inv.toplamTutar ?? inv.faturaTutari ?? inv.odenecekTutar ?? inv.malHizmetToplamTutari ?? inv.tutar ?? "";
+        return [
+            escapeCsv(belgeNo),
+            escapeCsv(ettn),
+            escapeCsv(tarih),
+            escapeCsv(aliciUnvan),
+            escapeCsv(aliciVkn),
+            escapeCsv(belgeTuru),
+            escapeCsv(rawOnay),
+            escapeCsv(tutarVal)
+        ].join(";");
+    });
+    // UTF-8 BOM ekleyerek Türkçe karakterlerin Excel'de doğru açılmasını sağla
+    const csvContent = "\uFEFF" + [headers.map(h => `"${h}"`).join(";"), ...rows].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `faturalar-${dateStr}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast(`${state.invoices.length} fatura CSV olarak indirildi.`, "success");
 }
 // JSON Modalı Göster
 function showJsonModal(data) {
@@ -1162,6 +1632,16 @@ function showLocalInvoicePreview(payload) {
         </body>
         </html>
     `;
+    state.currentPreviewUuid = null;
+    state.currentPreviewSigned = false;
+    state.currentPreviewHtml = previewHtml;
+    state.currentPreviewBelgeNo = "Taslak";
+    const titleEl = document.getElementById("previewModalTitle");
+    const subTitleEl = document.getElementById("previewModalSubtitle");
+    if (titleEl)
+        titleEl.textContent = "Taslak Fatura Önizleme";
+    if (subTitleEl)
+        subTitleEl.textContent = "Form verilerinden oluşturulmuş yerel taslak";
     const iframe = document.getElementById("previewIframe");
     if (iframe) {
         iframe.srcdoc = previewHtml;
@@ -1192,10 +1672,11 @@ async function loadUserData() {
         </div>
     `;
     try {
+        const currentUserCode = state.userCode || sessionStorage.getItem("gib_user_code") || localStorage.getItem("gib_user_code") || document.getElementById("loginUsername")?.value.trim() || undefined;
         const res = await fetch("/api/user-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ env: state.env, token: state.token }),
+            body: JSON.stringify({ env: state.env, token: state.token, userCode: currentUserCode }),
         });
         const json = await res.json();
         if (json.success && json.data) {
@@ -1247,6 +1728,19 @@ async function loadUserData() {
             if (country)
                 addrParts.push(country);
             const displayAddress = addrParts.join(" ") || "-";
+            // Kullanıcı Kodu (Login olurken kullanılan değer)
+            const inputLoginVal = document.getElementById("loginUsername")?.value.trim();
+            const userCode = String(u.userCode || "").trim() ||
+                state.userCode ||
+                sessionStorage.getItem("gib_user_code") ||
+                localStorage.getItem("gib_user_code") ||
+                inputLoginVal ||
+                "-";
+            if (userCode && userCode !== "-") {
+                state.userCode = userCode;
+                sessionStorage.setItem("gib_user_code", userCode);
+                localStorage.setItem("gib_user_code", userCode);
+            }
             // Navbar'daki kullanıcı adını da güncelle
             if (displayTitle && displayTitle !== "-") {
                 state.username = displayTitle;
@@ -1255,23 +1749,46 @@ async function loadUserData() {
             container.innerHTML = `
                 <div class="row g-4">
                     <div class="col-md-6">
-                        <label class="form-label text-muted small mb-0 fw-semibold">Ünvan / Ad Soyad</label>
+                        <label class="form-label text-muted small mb-1 fw-semibold">
+                            <i class="bi bi-building text-primary me-1"></i>Ünvan / Ad Soyad
+                        </label>
                         <div class="fw-bold fs-6 text-dark">${displayTitle}</div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label text-muted small mb-0 fw-semibold">VKN / TCKN</label>
+                        <label class="form-label text-muted small mb-1 fw-semibold">
+                            <i class="bi bi-person-badge text-primary me-1"></i>Kullanıcı Kodu
+                        </label>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="fw-bold fs-6 font-monospace text-dark bg-light px-2 py-1 rounded border">${userCode}</span>
+                            ${userCode !== "-" ? `
+                            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size: 0.75rem; height: 28px;" id="btnCopyUserCode" title="Kullanıcı kodunu panoya kopyala">
+                                <i class="bi bi-clipboard me-1"></i>Kopyala
+                            </button>
+                            ` : ""}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label text-muted small mb-1 fw-semibold">
+                            <i class="bi bi-hash text-primary me-1"></i>VKN / TCKN
+                        </label>
                         <div class="fw-bold fs-6 text-primary">${taxId}</div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label text-muted small mb-0 fw-semibold">Vergi Dairesi</label>
-                        <div class="text-secondary">${taxOffice}</div>
+                        <label class="form-label text-muted small mb-1 fw-semibold">
+                            <i class="bi bi-bank text-primary me-1"></i>Vergi Dairesi
+                        </label>
+                        <div class="text-secondary fw-semibold">${taxOffice}</div>
                     </div>
-                    <div class="col-md-6">
-                        <label class="form-label text-muted small mb-0 fw-semibold">İletişim (Telefon / E-posta)</label>
+                    <div class="col-12">
+                        <label class="form-label text-muted small mb-1 fw-semibold">
+                            <i class="bi bi-telephone text-primary me-1"></i>İletişim (Telefon / E-posta)
+                        </label>
                         <div class="text-secondary">${contactInfo}</div>
                     </div>
                     <div class="col-12">
-                        <label class="form-label text-muted small mb-0 fw-semibold">Mükellef Adresi</label>
+                        <label class="form-label text-muted small mb-1 fw-semibold">
+                            <i class="bi bi-geo-alt text-primary me-1"></i>Mükellef Adresi
+                        </label>
                         <div class="text-secondary p-3 bg-light rounded border">${displayAddress}</div>
                     </div>
                     ${mersisNo || registryNo || web ? `
@@ -1285,6 +1802,14 @@ async function loadUserData() {
                     ` : ""}
                 </div>
             `;
+            const btnCopyCode = document.getElementById("btnCopyUserCode");
+            if (btnCopyCode) {
+                btnCopyCode.addEventListener("click", () => {
+                    navigator.clipboard.writeText(userCode).then(() => {
+                        showToast(`Kullanıcı kodu kopyalandı: ${userCode}`, "info");
+                    });
+                });
+            }
         }
         else {
             const err = json.error || "Mükellef bilgileri alınamadı.";
@@ -1931,6 +2456,47 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnFetchRecipient = document.getElementById("btnFetchRecipient");
     if (btnFetchRecipient)
         btnFetchRecipient.addEventListener("click", handleFetchRecipient);
+    // VKN Hızlı Seçim Butonları
+    const btnQuickNihai = document.getElementById("btnQuickNihaiTuketici");
+    if (btnQuickNihai) {
+        btnQuickNihai.addEventListener("click", () => {
+            const taxInput = document.getElementById("taxIDOrTRID");
+            const titleInput = document.getElementById("title");
+            const nameInput = document.getElementById("name");
+            const surnameInput = document.getElementById("surname");
+            const countryInput = document.getElementById("country");
+            if (taxInput)
+                taxInput.value = "11111111111";
+            if (titleInput)
+                titleInput.value = "Nihai Tüketici";
+            if (nameInput)
+                nameInput.value = "Nihai";
+            if (surnameInput)
+                surnameInput.value = "Tüketici";
+            if (countryInput)
+                countryInput.value = "Türkiye";
+            showToast("Nihai Tüketici (11111111111) bilgileri dolduruldu.", "info");
+        });
+    }
+    const btnQuickYurtdisi = document.getElementById("btnQuickYurtdisi");
+    if (btnQuickYurtdisi) {
+        btnQuickYurtdisi.addEventListener("click", () => {
+            const taxInput = document.getElementById("taxIDOrTRID");
+            const invoiceType = document.getElementById("invoiceType");
+            const currency = document.getElementById("currency");
+            if (taxInput)
+                taxInput.value = "2222222222";
+            if (invoiceType) {
+                invoiceType.value = "ISTISNA";
+                invoiceType.dispatchEvent(new Event("change"));
+            }
+            if (currency) {
+                currency.value = "USD";
+                currency.dispatchEvent(new Event("change"));
+            }
+            showToast("Yurtdışı Müşteri (2222222222) ve İstisna faturası seçildi.", "info");
+        });
+    }
     // Fatura Oluştur Butonları
     const btnDraft = document.getElementById("btnCreateDraft");
     if (btnDraft)
@@ -1971,7 +2537,28 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
     }
-    // İndir Butonu (Önizleme içinden)
+    // Modal İçinden PDF İndir Butonu
+    const btnDownloadPdfModal = document.getElementById("btnDownloadPdfFromPreview");
+    if (btnDownloadPdfModal) {
+        btnDownloadPdfModal.addEventListener("click", async () => {
+            await downloadCurrentPreviewPdf();
+        });
+    }
+    // Modal İçinden Yeni Sekmede Aç Butonu
+    const btnOpenNewTabModal = document.getElementById("btnOpenInNewTab");
+    if (btnOpenNewTabModal) {
+        btnOpenNewTabModal.addEventListener("click", () => {
+            openPreviewInNewTab();
+        });
+    }
+    // Modal İçinden Tam Ekran Değiştir Butonu
+    const btnFullscreenModal = document.getElementById("btnToggleFullscreenPreview");
+    if (btnFullscreenModal) {
+        btnFullscreenModal.addEventListener("click", () => {
+            toggleFullscreenPreview();
+        });
+    }
+    // İndir Butonu (Önizleme içinden ZIP)
     const btnDownloadModal = document.getElementById("btnDownloadFromPreview");
     if (btnDownloadModal) {
         btnDownloadModal.addEventListener("click", () => {
@@ -1983,52 +2570,92 @@ document.addEventListener("DOMContentLoaded", () => {
     // Faturaları Listele Butonu
     const btnList = document.getElementById("btnListInvoices");
     if (btnList)
-        btnList.addEventListener("click", handleListInvoices);
+        btnList.addEventListener("click", () => handleListInvoices());
+    // Tarih alanları elle değiştirildiğinde kısıtları uygula, bitiş tarihini otomatik ayarla ve buton vurgusunu temizle
+    const filterStartInput = document.getElementById("filterStartDate");
+    const filterEndInput = document.getElementById("filterEndDate");
+    if (filterStartInput) {
+        filterStartInput.addEventListener("change", () => {
+            syncDateInputsConstraint("start");
+            setQuickDateActiveButton(null);
+        });
+    }
+    if (filterEndInput) {
+        filterEndInput.addEventListener("change", () => {
+            syncDateInputsConstraint("end");
+            setQuickDateActiveButton(null);
+        });
+    }
     // Hızlı Bugün Butonu
     const btnToday = document.getElementById("btnQuickDateToday");
     if (btnToday) {
-        btnToday.addEventListener("click", () => {
-            initDateFields();
-            handleListInvoices();
-        });
+        btnToday.addEventListener("click", () => applyQuickDateFilter("today", "btnQuickDateToday"));
+    }
+    // Hızlı Dün Butonu
+    const btnYesterday = document.getElementById("btnQuickDateYesterday");
+    if (btnYesterday) {
+        btnYesterday.addEventListener("click", () => applyQuickDateFilter("yesterday", "btnQuickDateYesterday"));
+    }
+    // Hızlı Son 3 Gün Butonu
+    const btn3Days = document.getElementById("btnQuickDate3Days");
+    if (btn3Days) {
+        btn3Days.addEventListener("click", () => applyQuickDateFilter(3, "btnQuickDate3Days"));
     }
     // Hızlı Son 7 Gün Butonu
     const btn7Days = document.getElementById("btnQuickDate7Days");
     if (btn7Days) {
-        btn7Days.addEventListener("click", () => {
-            const startInput = document.getElementById("filterStartDate");
-            const endInput = document.getElementById("filterEndDate");
-            const now = new Date();
-            const past = new Date();
-            past.setDate(past.getDate() - 6);
-            const pad = (n) => n.toString().padStart(2, "0");
-            if (endInput)
-                endInput.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-            if (startInput)
-                startInput.value = `${past.getFullYear()}-${pad(past.getMonth() + 1)}-${past.getDate()}`;
-            handleListInvoices();
-        });
+        btn7Days.addEventListener("click", () => applyQuickDateFilter(7, "btnQuickDate7Days"));
     }
-    // Hızlı Bu Ay Butonu
-    const btnThisMonth = document.getElementById("btnQuickDateThisMonth");
-    if (btnThisMonth) {
-        btnThisMonth.addEventListener("click", () => {
-            const startInput = document.getElementById("filterStartDate");
-            const endInput = document.getElementById("filterEndDate");
-            const now = new Date();
-            const pad = (n) => n.toString().padStart(2, "0");
-            if (endInput)
-                endInput.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-            if (startInput)
-                startInput.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-            handleListInvoices();
-        });
-    }
-    // Fatura Listesinde Canlı Arama
+    // Fatura Listesinde Canlı Arama ve Temizle Butonu (Debounced)
     const invoiceSearch = document.getElementById("invoiceSearchInput");
+    const btnClearSearch = document.getElementById("btnClearSearch");
+    let searchDebounceTimer = null;
     if (invoiceSearch) {
         invoiceSearch.addEventListener("input", () => {
+            if (btnClearSearch) {
+                btnClearSearch.classList.toggle("d-none", !invoiceSearch.value.trim());
+            }
+            if (searchDebounceTimer)
+                clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
+                renderInvoicesTable();
+            }, 120);
+        });
+    }
+    if (btnClearSearch && invoiceSearch) {
+        btnClearSearch.addEventListener("click", () => {
+            if (searchDebounceTimer)
+                clearTimeout(searchDebounceTimer);
+            invoiceSearch.value = "";
+            btnClearSearch.classList.add("d-none");
             renderInvoicesTable();
+            invoiceSearch.focus();
+        });
+    }
+    // Fatura Durum Filtre Butonları (Tümü, Onaylı, Taslak, Silinmiş)
+    const statusFilterGroup = document.getElementById("invoiceStatusFilterGroup");
+    if (statusFilterGroup) {
+        statusFilterGroup.querySelectorAll("button[data-filter]").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                const targetBtn = e.currentTarget;
+                const filterVal = (targetBtn.dataset.filter || "all");
+                state.invoiceStatusFilter = filterVal;
+                // Buton görünümlerini güncelle
+                statusFilterGroup.querySelectorAll("button").forEach((b) => {
+                    b.classList.remove("active", "btn-primary");
+                    b.classList.add("btn-outline-secondary");
+                });
+                targetBtn.classList.remove("btn-outline-secondary");
+                targetBtn.classList.add("active", "btn-primary");
+                renderInvoicesTable();
+            });
+        });
+    }
+    // Faturaları CSV Olarak Dışa Aktar Butonu
+    const btnExportCsv = document.getElementById("btnExportInvoicesCsv");
+    if (btnExportCsv) {
+        btnExportCsv.addEventListener("click", () => {
+            exportInvoicesToCsv();
         });
     }
     // Formu Sıfırla / Temizle Butonu
@@ -2105,6 +2732,27 @@ document.addEventListener("DOMContentLoaded", () => {
         tabUserBtn.addEventListener("click", () => {
             loadUserData();
         });
+    }
+    // Şifre Göster / Gizle Butonu
+    const btnTogglePassword = document.getElementById("btnTogglePassword");
+    const loginPasswordInput = document.getElementById("loginPassword");
+    const passwordToggleIcon = document.getElementById("passwordToggleIcon");
+    if (btnTogglePassword && loginPasswordInput && passwordToggleIcon) {
+        btnTogglePassword.addEventListener("click", () => {
+            const isPassword = loginPasswordInput.type === "password";
+            loginPasswordInput.type = isPassword ? "text" : "password";
+            passwordToggleIcon.className = isPassword ? "bi bi-eye-slash text-primary" : "bi bi-eye";
+        });
+    }
+    // Giriş modalındaki kullanıcı kodunu otomatik doldur (eğer daha önce girilmişse)
+    const loginUserInput = document.getElementById("loginUsername");
+    const rememberMeCheck = document.getElementById("rememberMeCheck");
+    const rememberedUserCode = localStorage.getItem("gib_last_username") || localStorage.getItem("gib_user_code") || sessionStorage.getItem("gib_user_code");
+    if (loginUserInput && !loginUserInput.value && rememberedUserCode) {
+        loginUserInput.value = rememberedUserCode;
+    }
+    if (rememberMeCheck) {
+        rememberMeCheck.checked = Boolean(localStorage.getItem("gib_user_code") || localStorage.getItem("gib_last_username") || !rememberedUserCode);
     }
     // Eğer önceden oturum açıksa kullanıcı verilerini yükle
     if (state.token) {

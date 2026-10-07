@@ -2,9 +2,11 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import { Buffer } from "node:buffer";
 import { GibClient } from "./gibClient.js";
 import type { EnvironmentKey, InvoiceListItem } from "./gibClient.js";
+import { convertHtmlToPdf, findBrowserExecutable } from "./pdfUtil.js";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const PUBLIC_DIR = path.resolve(process.cwd(), "public");
@@ -65,6 +67,32 @@ export function logServer(
     }
 }
 
+// Token -> Girişte kullanılan Kullanıcı Kodu haritası
+const tokenUserCodeMap = new Map<string, string>();
+
+// ETTN + Durum -> PDF arabelleği (Bellek önbelleği, aynı faturanın tekrar PDF dönüştürülmesini önler)
+const invoicePdfCache = new Map<string, { buffer: Buffer; timestamp: number }>();
+const MAX_PDF_CACHE_ENTRIES = 50;
+const PDF_CACHE_TTL_MS = 30 * 60 * 1000; // 30 dakika
+
+function getCachedPdf(key: string): Buffer | null {
+    const entry = invoicePdfCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > PDF_CACHE_TTL_MS) {
+        invoicePdfCache.delete(key);
+        return null;
+    }
+    return entry.buffer;
+}
+
+function setCachedPdf(key: string, buffer: Buffer): void {
+    if (invoicePdfCache.size >= MAX_PDF_CACHE_ENTRIES) {
+        const oldestKey = invoicePdfCache.keys().next().value;
+        if (oldestKey) invoicePdfCache.delete(oldestKey);
+    }
+    invoicePdfCache.set(key, { buffer, timestamp: Date.now() });
+}
+
 const MIME_TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
     ".js": "application/javascript; charset=utf-8",
@@ -76,6 +104,31 @@ const MIME_TYPES: Record<string, string> = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
 };
+
+/** GİB tarih formatını (GG/AA/YYYY) Date nesnesine dönüştürür */
+function parseGibDateString(str: string): Date {
+    const parts = str.split("/").map(Number);
+    if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+        return new Date(parts[2], parts[1] - 1, parts[0]);
+    }
+    return new Date();
+}
+
+/** Date nesnesini GİB tarih formatına (GG/AA/YYYY) dönüştürür */
+function formatGibDateString(date: Date): string {
+    const d = date.getDate().toString().padStart(2, "0");
+    const m = (date.getMonth() + 1).toString().padStart(2, "0");
+    const y = date.getFullYear();
+    return `${d}/${m}/${y}`;
+}
+
+/** İki GİB tarih formatı (GG/AA/YYYY) arasındaki takvim günü farkını hesaplar (başlangıç ve bitiş dahil) */
+function getGibDateRangeDays(startStr: string, endStr: string): number {
+    const start = parseGibDateString(startStr);
+    const end = parseGibDateString(endStr);
+    const msDiff = end.getTime() - start.getTime();
+    return Math.round(msDiff / (24 * 60 * 60 * 1000)) + 1;
+}
 
 /** JSON gövdesini (request body) parse eder */
 function readJsonBody<T = unknown>(req: http.IncomingMessage): Promise<T> {
@@ -113,7 +166,7 @@ function sendJson(res: http.ServerResponse, statusCode: number, data: unknown): 
     res.end(JSON.stringify(data));
 }
 
-/** Statik dosya sunar */
+/** Statik dosya sunar (ETag, 304 Not Modified ve Gzip desteği ile) */
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): void {
     const safePath = pathname === "/" ? "/index.html" : pathname;
     const filePath = path.normalize(path.join(PUBLIC_DIR, safePath));
@@ -133,14 +186,43 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathna
 
         const ext = path.extname(filePath).toLowerCase();
         const contentType = MIME_TYPES[ext] || "application/octet-stream";
+        const etag = `W/"${stats.size.toString(16)}-${stats.mtimeMs.toString(16)}"`;
 
-        res.writeHead(200, {
+        // 304 Not Modified kontrolü
+        if (req.headers["if-none-match"] === etag) {
+            res.writeHead(304, {
+                "ETag": etag,
+                "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+            });
+            res.end();
+            return;
+        }
+
+        const acceptEncoding = (req.headers["accept-encoding"] as string) || "";
+        const canGzip = /\bgzip\b/.test(acceptEncoding) && (
+            contentType.startsWith("text/") ||
+            contentType.startsWith("application/javascript") ||
+            contentType.startsWith("application/json")
+        );
+
+        const responseHeaders: Record<string, string | number> = {
             "Content-Type": contentType,
-            "Content-Length": stats.size,
-        });
+            "ETag": etag,
+            "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+        };
 
-        const stream = fs.createReadStream(filePath);
-        stream.pipe(res);
+        if (canGzip) {
+            responseHeaders["Content-Encoding"] = "gzip";
+            res.writeHead(200, responseHeaders);
+            const rawStream = fs.createReadStream(filePath);
+            const gzip = zlib.createGzip({ level: 6 });
+            rawStream.pipe(gzip).pipe(res);
+        } else {
+            responseHeaders["Content-Length"] = stats.size;
+            res.writeHead(200, responseHeaders);
+            const stream = fs.createReadStream(filePath);
+            stream.pipe(res);
+        }
     });
 }
 
@@ -228,7 +310,11 @@ const server = http.createServer(async (req: http.IncomingMessage, res: http.Ser
                     }
                 }
 
-                sendJson(res, 200, { success: true, token, env });
+                if (token && body.username) {
+                    tokenUserCodeMap.set(token, body.username);
+                }
+
+                sendJson(res, 200, { success: true, token, env, username: body.username });
                 return;
             }
 
@@ -238,6 +324,7 @@ const server = http.createServer(async (req: http.IncomingMessage, res: http.Ser
                 const env = body.env === "TEST" ? "TEST" : "PROD";
                 logServer("INFO", "AUTH", `Çıkış isteği alındı (Ortam=${env})`);
                 if (body.token) {
+                    tokenUserCodeMap.delete(body.token);
                     const client = getGibClient(env);
                     try {
                         await client.logout(body.token);
@@ -268,7 +355,7 @@ const server = http.createServer(async (req: http.IncomingMessage, res: http.Ser
                 return;
             }
 
-            // 4. Faturaları Listele (Tarih Aralığı)
+            // 4. Faturaları Listele (Tarih Aralığı Kontrolü - En Fazla 7 Gün)
             if (pathname === "/api/invoices" && req.method === "POST") {
                 const body = await readJsonBody<{
                     env?: EnvironmentKey;
@@ -283,26 +370,51 @@ const server = http.createServer(async (req: http.IncomingMessage, res: http.Ser
                     return;
                 }
 
-                logServer("INFO", "GIB", `Faturalar sorgulanıyor: ${body.startDate} - ${body.endDate} (Alıcı=${!!body.issuedToMe}, Ortam=${env})`);
-                const client = getGibClient(env);
-                let list: InvoiceListItem[];
-                if (body.issuedToMe) {
-                    list = await client.getIncomingInvoices(body.token, body.startDate, body.endDate);
-                } else {
-                    list = await client.getOutgoingInvoices(body.token, body.startDate, body.endDate);
-                }
-
-                // GİB bazen data içinde { error: "..." } döndürür (örn: tarih aralığı 7 günden fazla olamaz)
-                if (!Array.isArray(list) && (list as unknown as { error?: string })?.error) {
-                    const errText = (list as unknown as { error: string }).error;
-                    logServer("WARN", "GIB", `GİB listeleme hatası: ${errText}`);
-                    sendJson(res, 400, { success: false, error: errText });
+                // Tarih doğrulaması
+                const startD = parseGibDateString(body.startDate);
+                const endD = parseGibDateString(body.endDate);
+                if (startD > endD) {
+                    logServer("WARN", "GIB", `Geçersiz tarih aralığı: ${body.startDate} - ${body.endDate} (Başlangıç bitişten sonra)`);
+                    sendJson(res, 400, { success: false, error: "Başlangıç tarihi bitiş tarihinden sonra olamaz." });
                     return;
                 }
 
-                const count = Array.isArray(list) ? list.length : 0;
-                logServer("INFO", "GIB", `${count} adet fatura listelendi.`);
-                sendJson(res, 200, { success: true, data: Array.isArray(list) ? list : [] });
+                const dayCount = getGibDateRangeDays(body.startDate, body.endDate);
+                if (dayCount > 7) {
+                    logServer("WARN", "GIB", `Tarih aralığı 7 günü aşıyor: ${body.startDate} - ${body.endDate} (${dayCount} gün)`);
+                    sendJson(res, 400, {
+                        success: false,
+                        error: `GİB e-Arşiv kuralı gereği tarih aralığı en fazla 7 gün olabilir. Seçilen aralık: ${dayCount} gün. Lütfen en fazla 7 günlük bir aralık seçiniz.`,
+                    });
+                    return;
+                }
+
+                logServer("INFO", "GIB", `Faturalar sorgulanıyor: ${body.startDate} - ${body.endDate} (${dayCount} gün, Alıcı=${!!body.issuedToMe}, Ortam=${env})`);
+                const client = getGibClient(env);
+
+                try {
+                    let invoices: InvoiceListItem[];
+                    if (body.issuedToMe) {
+                        invoices = await client.getIncomingInvoices(body.token, body.startDate, body.endDate);
+                    } else {
+                        invoices = await client.getOutgoingInvoices(body.token, body.startDate, body.endDate);
+                    }
+
+                    const list = Array.isArray(invoices) ? invoices : [];
+                    // Faturaları tarihe göre azalan (en yeni en üstte) sırala
+                    list.sort((a, b) => {
+                        const tA = String(a.belgeTarihi || a.faturaTarihi || a.date || "");
+                        const tB = String(b.belgeTarihi || b.faturaTarihi || b.date || "");
+                        return tB.localeCompare(tA);
+                    });
+
+                    logServer("INFO", "GIB", `${list.length} adet fatura başarıyla listelendi (${body.startDate} - ${body.endDate}).`);
+                    sendJson(res, 200, { success: true, data: list });
+                } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    logServer("ERROR", "GIB", `Fatura listeleme hatası: ${errMsg}`);
+                    sendJson(res, 500, { success: false, error: errMsg });
+                }
                 return;
             }
 
@@ -632,6 +744,168 @@ const server = http.createServer(async (req: http.IncomingMessage, res: http.Ser
                 return;
             }
 
+            // 7.1 PDF Durum Kontrolü (Tarayıcı Hazır mı?)
+            if (pathname === "/api/pdf/status" && req.method === "GET") {
+                const browserPath = await findBrowserExecutable();
+                sendJson(res, 200, {
+                    success: true,
+                    available: Boolean(browserPath),
+                    browserPath,
+                });
+                return;
+            }
+
+            // 7.2 Fatura Doğrudan PDF İndir (GET)
+            if (pathname === "/api/invoices/pdf" && req.method === "GET") {
+                const env = reqUrl.searchParams.get("env") === "TEST" ? "TEST" : "PROD";
+                const token = reqUrl.searchParams.get("token") || "";
+                const uuid = reqUrl.searchParams.get("uuid") || "";
+                const signed = reqUrl.searchParams.get("signed") === "true";
+                const onayDurumu = reqUrl.searchParams.get("onayDurumu") || (signed ? "Onaylandı" : "Onaylanmadı");
+                const belgeNo = reqUrl.searchParams.get("belgeNo") || uuid;
+
+                if (!token || !uuid) {
+                    sendJson(res, 400, { success: false, error: "Token ve UUID gereklidir." });
+                    return;
+                }
+
+                logServer("INFO", "GIB", `Fatura doğrudan PDF isteniyor: UUID=${uuid}, Durum=${onayDurumu}`);
+                const cacheKey = `${env}:${uuid}:${onayDurumu}`;
+                const cached = getCachedPdf(cacheKey);
+                if (cached) {
+                    logServer("INFO", "SYSTEM", `PDF önbellekten getirildi (Cache Hit: ${uuid}, ${cached.length} bayt).`);
+                    const safeFilename = encodeURIComponent(`fatura-${belgeNo}.pdf`);
+                    res.writeHead(200, {
+                        "Content-Type": "application/pdf",
+                        "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`,
+                        "Content-Length": cached.length,
+                    });
+                    res.end(cached);
+                    return;
+                }
+
+                const client = getGibClient(env);
+                try {
+                    const html = await client.getInvoiceHTML(token, uuid, onayDurumu === "Onaylandı");
+                    if (!html) {
+                        sendJson(res, 404, { success: false, error: "GİB'den fatura HTML verisi alınamadı." });
+                        return;
+                    }
+
+                    logServer("INFO", "SYSTEM", `Fatura HTML'den PDF'e dönüştürülüyor: ${uuid}`);
+                    const pdfBuffer = await convertHtmlToPdf(html);
+                    setCachedPdf(cacheKey, pdfBuffer);
+                    logServer("INFO", "SYSTEM", `PDF başarıyla oluşturuldu (${pdfBuffer.length} bayt).`);
+
+                    const safeFilename = encodeURIComponent(`fatura-${belgeNo}.pdf`);
+                    res.writeHead(200, {
+                        "Content-Type": "application/pdf",
+                        "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`,
+                        "Content-Length": pdfBuffer.length,
+                    });
+                    res.end(pdfBuffer);
+                } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    logServer("ERROR", "SYSTEM", `PDF oluşturma hatası (uuid=${uuid}): ${msg}`);
+                    sendJson(res, 500, { success: false, error: `PDF oluşturulamadı: ${msg}` });
+                }
+                return;
+            }
+
+            // 7.3 Fatura Doğrudan PDF İndir (POST)
+            if (pathname === "/api/invoices/pdf" && req.method === "POST") {
+                const body = await readJsonBody<{
+                    env?: EnvironmentKey;
+                    token?: string;
+                    uuid?: string;
+                    signed?: boolean;
+                    onayDurumu?: string;
+                    belgeNo?: string;
+                }>(req);
+                const env = body.env === "TEST" ? "TEST" : "PROD";
+
+                if (!body.token || !body.uuid) {
+                    sendJson(res, 400, { success: false, error: "Token ve UUID gereklidir." });
+                    return;
+                }
+
+                const onayDurumu = body.onayDurumu || (body.signed ? "Onaylandı" : "Onaylanmadı");
+                const belgeNo = body.belgeNo || body.uuid;
+
+                logServer("INFO", "GIB", `Fatura doğrudan PDF isteniyor (POST): UUID=${body.uuid}, Durum=${onayDurumu}`);
+                const cacheKey = `${env}:${body.uuid}:${onayDurumu}`;
+                const cached = getCachedPdf(cacheKey);
+                if (cached) {
+                    logServer("INFO", "SYSTEM", `PDF önbellekten getirildi (Cache Hit: ${body.uuid}, ${cached.length} bayt).`);
+                    const safeFilename = encodeURIComponent(`fatura-${belgeNo}.pdf`);
+                    res.writeHead(200, {
+                        "Content-Type": "application/pdf",
+                        "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`,
+                        "Content-Length": cached.length,
+                    });
+                    res.end(cached);
+                    return;
+                }
+
+                const client = getGibClient(env);
+                try {
+                    const html = await client.getInvoiceHTML(body.token, body.uuid, onayDurumu === "Onaylandı");
+                    if (!html) {
+                        sendJson(res, 404, { success: false, error: "GİB'den fatura HTML verisi alınamadı." });
+                        return;
+                    }
+
+                    logServer("INFO", "SYSTEM", `Fatura HTML'den PDF'e dönüştürülüyor: ${body.uuid}`);
+                    const pdfBuffer = await convertHtmlToPdf(html);
+                    setCachedPdf(cacheKey, pdfBuffer);
+                    logServer("INFO", "SYSTEM", `PDF başarıyla oluşturuldu (${pdfBuffer.length} bayt).`);
+
+                    const safeFilename = encodeURIComponent(`fatura-${belgeNo}.pdf`);
+                    res.writeHead(200, {
+                        "Content-Type": "application/pdf",
+                        "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`,
+                        "Content-Length": pdfBuffer.length,
+                    });
+                    res.end(pdfBuffer);
+                } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    logServer("ERROR", "SYSTEM", `PDF oluşturma hatası (uuid=${body.uuid}): ${msg}`);
+                    sendJson(res, 500, { success: false, error: `PDF oluşturulamadı: ${msg}` });
+                }
+                return;
+            }
+
+            // 7.4 Herhangi Bir HTML'i PDF'e Dönüştür (POST)
+            if (pathname === "/api/pdf/convert" && req.method === "POST") {
+                const body = await readJsonBody<{
+                    html?: string;
+                    filename?: string;
+                }>(req);
+
+                if (!body.html) {
+                    sendJson(res, 400, { success: false, error: "Dönüştürülecek HTML içeriği gereklidir." });
+                    return;
+                }
+
+                try {
+                    logServer("INFO", "SYSTEM", `HTML metninden doğrudan PDF oluşturuluyor (${body.html.length} karakter)...`);
+                    const pdfBuffer = await convertHtmlToPdf(body.html);
+                    const filename = encodeURIComponent(body.filename || "belge.pdf");
+
+                    res.writeHead(200, {
+                        "Content-Type": "application/pdf",
+                        "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${filename}`,
+                        "Content-Length": pdfBuffer.length,
+                    });
+                    res.end(pdfBuffer);
+                } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    logServer("ERROR", "SYSTEM", `HTML->PDF dönüştürme hatası: ${msg}`);
+                    sendJson(res, 500, { success: false, error: `PDF oluşturulamadı: ${msg}` });
+                }
+                return;
+            }
+
             // 8. Taslak Faturayı İmzala
             if (pathname === "/api/invoices/sign" && req.method === "POST") {
                 const body = await readJsonBody<{
@@ -681,7 +955,7 @@ const server = http.createServer(async (req: http.IncomingMessage, res: http.Ser
 
             // 10. Kullanıcı Profil Bilgisi
             if (pathname === "/api/user-data" && req.method === "POST") {
-                const body = await readJsonBody<{ env?: EnvironmentKey; token?: string }>(req);
+                const body = await readJsonBody<{ env?: EnvironmentKey; token?: string; userCode?: string }>(req);
                 const env = body.env === "TEST" ? "TEST" : "PROD";
                 if (!body.token) {
                     sendJson(res, 400, { success: false, error: "Token zorunludur." });
@@ -692,7 +966,17 @@ const server = http.createServer(async (req: http.IncomingMessage, res: http.Ser
                 try {
                     const client = getGibClient(env);
                     const data = await client.getUserData(body.token);
-                    logServer("INFO", "GIB", `Mükellef verisi başarıyla alındı: ${data.name || data.title || data.taxIDOrTRID}`);
+
+                    // Girişte kullanılan kullanıcı kodunu ekle
+                    const loginUserCode = tokenUserCodeMap.get(body.token) || body.userCode;
+                    if (loginUserCode) {
+                        data.userCode = loginUserCode;
+                        if (!tokenUserCodeMap.has(body.token)) {
+                            tokenUserCodeMap.set(body.token, loginUserCode);
+                        }
+                    }
+
+                    logServer("INFO", "GIB", `Mükellef verisi başarıyla alındı: ${data.name || data.title || data.taxIDOrTRID} (Kullanıcı Kodu: ${data.userCode || "-"})`);
                     sendJson(res, 200, { success: true, data });
                 } catch (err: unknown) {
                     const errorMsg = err instanceof Error ? err.message : String(err);
