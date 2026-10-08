@@ -1,0 +1,16 @@
+[build]
+  publish = "public"
+  command = "npm run build"
+
+# GİB e-Arşiv Servisleri Ters Proxy Yedek Rotası (İsteğe bağlı veya doğrudan CORS kısıtlamalarında)
+[[redirects]]
+  from = "/gib-proxy/test/*"
+  to = "https://earsivportaltest.efatura.gov.tr/earsiv-services/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/gib-proxy/prod/*"
+  to = "https://earsivportal.efatura.gov.tr/earsiv-services/:splat"
+  status = 200
+  force = true

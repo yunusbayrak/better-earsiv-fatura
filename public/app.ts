@@ -1,4 +1,6 @@
-// e-Arşiv Fatura Arayüzü TypeScript İstemci Mantığı
+// e-Arşiv Fatura Arayüzü TypeScript İstemci Mantığı (Sunucusuz / 100% Client-Side)
+import { generateGibInvoiceHtml } from "./gibTemplate.js";
+import { GibClient, EnvironmentKey, InvoiceListItem, UserProfileData, LogLevel, LogCategory } from "./gibClient.js";
 
 declare const bootstrap: {
     Modal: {
@@ -9,6 +11,99 @@ declare const bootstrap: {
         new (element: HTMLElement | null): { show(): void };
     };
 };
+
+function getGibClient(env: EnvironmentKey = state.env): GibClient {
+    return new GibClient(env, logApp);
+}
+
+function prepareInvoiceHtmlForPdf(rawHtml: string): string {
+    const printStyles = `
+    <style id="better-earsiv-pdf-print-style">
+        @page {
+            size: A4 portrait;
+            margin: 8mm 6mm 8mm 6mm;
+        }
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                background-color: #ffffff !important;
+                color: #000000 !important;
+                font-family: Arial, "Helvetica Neue", Helvetica, sans-serif !important;
+            }
+            table {
+                page-break-inside: avoid;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            background-color: #ffffff;
+        }
+    </style>
+    `;
+    if (rawHtml.includes("</head>")) {
+        return rawHtml.replace("</head>", `${printStyles}\n</head>`);
+    }
+    return `${printStyles}\n${rawHtml}`;
+}
+
+async function generatePdfFromHtml(rawHtml: string, filename: string): Promise<void> {
+    const styledHtml = prepareInvoiceHtmlForPdf(rawHtml);
+
+    // 1. html2pdf kütüphanesi mevcutsa (CDN)
+    const globalHtml2Pdf = (window as unknown as { html2pdf?: unknown }).html2pdf;
+    if (typeof globalHtml2Pdf === "function") {
+        const tempDiv = document.createElement("div");
+        tempDiv.style.position = "fixed";
+        tempDiv.style.left = "-9999px";
+        tempDiv.style.top = "0";
+        tempDiv.style.width = "210mm";
+        tempDiv.style.backgroundColor = "#ffffff";
+        tempDiv.innerHTML = styledHtml;
+        document.body.appendChild(tempDiv);
+
+        try {
+            const opt = {
+                margin: [8, 6, 8, 6],
+                filename,
+                image: { type: "jpeg", quality: 0.98 },
+                html2canvas: { scale: 2, useCORS: true, logging: false },
+                jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+            };
+            // @ts-ignore
+            await globalHtml2Pdf().set(opt).from(tempDiv).save();
+            return;
+        } finally {
+            tempDiv.remove();
+        }
+    }
+
+    // 2. Yedek: Tarayıcının yerel yazdırma penceresini aç
+    const printFrame = document.createElement("iframe");
+    printFrame.style.position = "fixed";
+    printFrame.style.right = "0";
+    printFrame.style.bottom = "0";
+    printFrame.style.width = "0";
+    printFrame.style.height = "0";
+    printFrame.style.border = "0";
+    document.body.appendChild(printFrame);
+
+    printFrame.srcdoc = styledHtml;
+    printFrame.onload = () => {
+        setTimeout(() => {
+            try {
+                printFrame.contentWindow?.focus();
+                printFrame.contentWindow?.print();
+            } finally {
+                setTimeout(() => printFrame.remove(), 1000);
+            }
+        }, 300);
+    };
+}
 
 interface InvoiceItemState {
     id: string;
@@ -37,6 +132,7 @@ interface AppState {
     currentJsonModalData: unknown | null;
     currentDraftDetailItem: Record<string, unknown> | null;
     invoiceStatusFilter: "all" | "signed" | "draft" | "deleted";
+    userData: Record<string, unknown> | null;
 }
 
 const state: AppState = {
@@ -54,6 +150,7 @@ const state: AppState = {
     currentJsonModalData: null,
     currentDraftDetailItem: null,
     invoiceStatusFilter: "all",
+    userData: null,
 };
 
 // Sayıdan Para Birimi Metnine Çevirici (Örn: BeşBinYüz ABD Doları / Bin Türk Lirası)
@@ -563,6 +660,7 @@ export interface InvoicePayload {
     grandTotal: number;
     grandTotalInclVAT: number;
     paymentTotal: number;
+    [key: string]: unknown;
 }
 
 // Fatura Formu Verisini Hazırla
@@ -681,22 +779,14 @@ async function handleLogin(e: Event): Promise<void> {
         submitBtn.disabled = true;
         if (spinner) spinner.classList.remove("d-none");
 
-        const res = await fetch("/api/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ env, username, password }),
-        });
-        const data = await res.json();
+        const client = getGibClient(env);
+        const token = await client.getToken(username, password);
 
-        if (!data.success) {
-            throw new Error(data.error || "Giriş başarısız oldu.");
-        }
-
-        state.token = data.token;
+        state.token = token;
         state.env = env;
         state.userCode = username;
         state.username = username;
-        sessionStorage.setItem("gib_token", data.token);
+        sessionStorage.setItem("gib_token", token);
         sessionStorage.setItem("gib_env", env);
         sessionStorage.setItem("gib_user_code", username);
         sessionStorage.setItem("gib_username", username);
@@ -774,11 +864,8 @@ function resetInvoiceForm(): void {
 async function handleLogout(): Promise<void> {
     if (state.token) {
         try {
-            await fetch("/api/logout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ env: state.env, token: state.token }),
-            });
+            const client = getGibClient(state.env);
+            await client.logout(state.token);
         } catch {
             // yut
         }
@@ -848,17 +935,10 @@ async function handleFetchRecipient(): Promise<void> {
     btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span>`;
 
     try {
-        const res = await fetch("/api/recipient", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ env: state.env, token: state.token, taxId }),
-        });
-        const json = await res.json();
-        if (!json.success) {
-            throw new Error(json.error || "Alıcı sorgulanamadı.");
-        }
+        const client = getGibClient(state.env);
+        const dataRaw = await client.getRecipientData(state.token, taxId);
+        const data = ((dataRaw as Record<string, unknown>)?.data || dataRaw) as Record<string, string | undefined> | undefined;
 
-        const data = json.data?.data || json.data;
         if (data) {
             const titleInput = document.getElementById("title") as HTMLInputElement;
             const nameInput = document.getElementById("name") as HTMLInputElement;
@@ -904,21 +984,8 @@ async function handleCreateInvoice(sign: boolean): Promise<void> {
     btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> İşleniyor...`;
 
     try {
-        const res = await fetch("/api/invoices/create", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                env: state.env,
-                token: state.token,
-                invoiceDetails: payload,
-                sign,
-            }),
-        });
-        const data = await res.json();
-
-        if (!data.success) {
-            throw new Error(data.error || "Fatura oluşturulamadı.");
-        }
+        const client = getGibClient(state.env);
+        const data = await client.createInvoice(state.token, payload, sign);
 
         const draft = data.draft;
         const uuid = draft?.uuid || data.foundInvoice?.ettn;
@@ -973,23 +1040,14 @@ async function previewInvoiceHtml(uuid: string, onayDurumu: string | boolean = "
     if (modalEl) new bootstrap.Modal(modalEl).show();
 
     try {
-        const res = await fetch("/api/invoices/html", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                env: state.env,
-                token: state.token,
-                uuid,
-                onayDurumu,
-            }),
-        });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || "HTML getirilemedi.");
+        const client = getGibClient(state.env);
+        const html = await client.getInvoiceHTML(state.token, uuid, isSigned);
+        if (!html) throw new Error("GİB'den fatura HTML verisi alınamadı.");
 
-        state.currentPreviewHtml = data.html;
+        state.currentPreviewHtml = html;
         const iframe = document.getElementById("previewIframe") as HTMLIFrameElement;
         if (iframe) {
-            iframe.srcdoc = data.html;
+            iframe.srcdoc = html;
         }
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1013,36 +1071,19 @@ async function downloadInvoicePdf(uuid: string, onayDurumu: string = "Onaylanmad
     const overlay = document.getElementById("previewLoadingOverlay");
     const overlayText = document.getElementById("previewLoadingText");
     if (overlay) overlay.classList.remove("d-none");
-    if (overlayText) overlayText.textContent = "Fatura PDF formatına dönüştürülüyor...";
+    if (overlayText) overlayText.textContent = "Fatura HTML verisi GİB'den alınıyor...";
 
     showToast("PDF hazırlanıyor, lütfen bekleyin...", "info");
 
     try {
-        const query = new URLSearchParams({
-            env: state.env,
-            token: state.token,
-            uuid,
-            signed: onayDurumu === "Onaylandı" ? "true" : "false",
-            onayDurumu,
-            belgeNo: belgeNo || uuid,
-        });
+        const client = getGibClient(state.env);
+        const isSigned = onayDurumu === "Onaylandı";
+        const html = await client.getInvoiceHTML(state.token, uuid, isSigned);
+        if (!html) throw new Error("GİB'den fatura HTML verisi alınamadı.");
 
-        const res = await fetch(`/api/invoices/pdf?${query.toString()}`);
-        if (!res.ok) {
-            const errJson = await res.json().catch(() => null);
-            throw new Error(errJson?.error || `HTTP ${res.status}`);
-        }
-
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
         const filename = `fatura-${belgeNo || uuid}.pdf`;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
+        if (overlayText) overlayText.textContent = "PDF dosyası oluşturuluyor...";
+        await generatePdfFromHtml(html, filename);
 
         showToast(`PDF başarıyla indirildi: ${filename}`, "success");
     } catch (err: unknown) {
@@ -1079,30 +1120,8 @@ async function downloadCurrentPreviewPdf(): Promise<void> {
 
     showToast("Taslak PDF hazırlanıyor...", "info");
     try {
-        const res = await fetch("/api/pdf/convert", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                html,
-                filename: "fatura-taslak.pdf",
-            }),
-        });
-
-        if (!res.ok) {
-            const errJson = await res.json().catch(() => null);
-            throw new Error(errJson?.error || `HTTP ${res.status}`);
-        }
-
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "fatura-taslak.pdf";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-
+        const filename = "fatura-taslak.pdf";
+        await generatePdfFromHtml(html, filename);
         showToast("Taslak PDF başarıyla indirildi!", "success");
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1189,22 +1208,15 @@ async function handleListInvoices(): Promise<void> {
     quickButtons.forEach((b) => (b.disabled = true));
 
     try {
-        const res = await fetch("/api/invoices", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                env: state.env,
-                token: state.token,
-                startDate,
-                endDate,
-                issuedToMe: typeVal === "incoming",
-            }),
-        });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error || "Faturalar getirilemedi.");
+        const client = getGibClient(state.env);
+        let invoices: InvoiceListItem[];
+        if (typeVal === "incoming") {
+            invoices = await client.getIncomingInvoices(state.token, startDate, endDate);
+        } else {
+            invoices = await client.getOutgoingInvoices(state.token, startDate, endDate);
+        }
 
-        state.invoices = Array.isArray(json.data) ? json.data : [];
-        console.log("[API Faturalar]", state.invoices);
+        state.invoices = invoices;
         renderInvoicesTable();
         showToast(`${state.invoices.length} adet fatura listelendi.`, "success");
     } catch (err: unknown) {
@@ -1370,7 +1382,7 @@ function renderInvoicesTable(): void {
                 <button class="btn btn-action-pdf" data-uuid="${ettn}" data-onay="Onaylandı" data-belgeno="${rawBelgeNo}" title="Doğrudan PDF İndir">
                     <i class="bi bi-file-earmark-pdf"></i> PDF
                 </button>
-                <a href="/api/invoices/download?env=${state.env}&token=${state.token}&uuid=${ettn}&signed=true" class="btn btn-outline-secondary" title="ZIP İndir" download>
+                <a href="${getGibClient(state.env).getDownloadURL(state.token || '', ettn, true)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary" title="ZIP İndir (Resmi GİB)" download="fatura-${rawBelgeNo || ettn}.zip">
                     <i class="bi bi-download"></i>
                 </a>
             `;
@@ -1511,13 +1523,8 @@ function renderInvoicesTable(): void {
             if (confirm(confirmMsg)) {
                 try {
                     showToast("Fatura imzalanıyor...", "info");
-                    const res = await fetch("/api/invoices/sign", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ env: state.env, token: state.token, uuid, draftInvoice: inv }),
-                    });
-                    const d = await res.json();
-                    if (!d.success) throw new Error(d.error || "İmzalanamadı.");
+                    const client = getGibClient(state.env);
+                    await client.signDraftInvoice(state.token, inv || ({ ettn: uuid } as InvoiceListItem));
                     showToast("Fatura başarıyla imzalandı!", "success");
                     handleListInvoices();
                 } catch (err: unknown) {
@@ -1666,112 +1673,16 @@ function showDraftDetailModal(item: Record<string, unknown>): void {
     if (modalEl) new bootstrap.Modal(modalEl).show();
 }
 
-// Form İçin Yerel Fatura Taslak Önizlemesi
+// Form İçin Yerel Fatura Taslak Önizlemesi (Resmi GİB sample.html Şablonu)
 function showLocalInvoicePreview(payload: InvoicePayload): void {
     if (!payload) return;
-    const curr = payload.currency || "TRY";
-    const rate = payload.currencyRate ? Number(payload.currencyRate) : 0;
-    const rateText = curr !== "TRY" && rate > 0 ? ` (Kur: ${rate.toFixed(4)} ₺)` : "";
 
-    const rowsHtml = payload.items.map((item, idx) => `
-        <tr>
-            <td class="text-center">${idx + 1}</td>
-            <td><strong>${item.name}</strong></td>
-            <td class="text-center">${item.quantity} ${item.unitType || "C62"}</td>
-            <td class="text-end">${Number(item.unitPrice || 0).toFixed(2)} ${curr}</td>
-            <td class="text-center">%${item.VATRate || 0}</td>
-            <td class="text-end">${Number(item.VATAmount || 0).toFixed(2)} ${curr}</td>
-            <td class="text-end fw-bold">${(Number(item.price || 0) + Number(item.VATAmount || 0)).toFixed(2)} ${curr}</td>
-        </tr>
-    `).join("");
-
-    const previewHtml = `
-        <!DOCTYPE html>
-        <html lang="tr">
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; color: #212529; }
-                .invoice-box { max-width: 800px; margin: auto; border: 1px solid #dee2e6; border-radius: 8px; padding: 24px; background: #fff; }
-                .header-table, .details-table, .items-table, .totals-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                .items-table th, .items-table td { border: 1px solid #dee2e6; padding: 8px 12px; font-size: 13px; }
-                .items-table th { background: #f8f9fa; font-weight: 600; }
-                .totals-table td { padding: 6px 12px; font-size: 14px; }
-                .watermark { position: fixed; top: 40%; left: 20%; transform: rotate(-30deg); font-size: 60px; color: rgba(220, 53, 69, 0.15); font-weight: 900; pointer-events: none; z-index: 1000; }
-                .alert-info { background: #e7f1ff; border: 1px solid #b6d4fe; border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 20px; color: #084298; }
-            </style>
-        </head>
-        <body>
-            <div class="watermark">TASLAK ÖNİZLEME</div>
-            <div class="invoice-box">
-                <div class="alert-info">
-                    ℹ️ <strong>Taslak Yerel Önizleme:</strong> Bu görünüm form verilerinizden oluşturulmuştur. GİB resmi HTML görünümü fatura sisteme kaydedilip onaylandıktan sonra GİB tarafından üretilir.
-                </div>
-                <table class="header-table">
-                    <tr>
-                        <td style="width: 50%; vertical-align: top;">
-                            <h3 style="margin: 0 0 8px 0; color: #0d6efd;">e-Arşiv Fatura</h3>
-                            <div style="font-size: 13px; color: #6c757d;">Fatura Tipi: <strong>${payload.invoiceType || "SATIS"}</strong></div>
-                            <div style="font-size: 13px; color: #6c757d;">Para Birimi: <strong>${curr}${rateText}</strong></div>
-                        </td>
-                        <td style="width: 50%; text-align: right; vertical-align: top; font-size: 13px;">
-                            <div>Fatura Tarihi: <strong>${payload.date}</strong></div>
-                            <div>Fatura Saati: <strong>${payload.time}</strong></div>
-                            <div>Belge No: <span style="background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-family: monospace;">Taslak (Henüz İmzalanmadı)</span></div>
-                        </td>
-                    </tr>
-                </table>
-
-                <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 14px; margin-bottom: 20px; font-size: 13px;">
-                    <strong style="color: #495057;">ALICI BİLGİLERİ</strong>
-                    <div style="font-size: 15px; font-weight: 700; margin-top: 4px;">${payload.title || `${payload.name || ""} ${payload.surname || ""}`.trim() || "Nihai Tüketici"}</div>
-                    <div>VKN / TCKN: <strong>${payload.taxIDOrTRID || "11111111111"}</strong> ${payload.taxOffice ? " | V.D.: " + payload.taxOffice : ""}</div>
-                    <div>Adres: ${payload.fullAddress || "-"}</div>
-                    <div>Ülke: <strong>${payload.country || "Türkiye"}</strong></div>
-                </div>
-
-                <table class="items-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 40px;">Sıra</th>
-                            <th>Mal / Hizmet</th>
-                            <th style="width: 100px;">Miktar</th>
-                            <th style="width: 110px;">Birim Fiyat</th>
-                            <th style="width: 80px;">KDV</th>
-                            <th style="width: 100px;">KDV Tutarı</th>
-                            <th style="width: 120px;">Toplam</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rowsHtml}
-                    </tbody>
-                </table>
-
-                <table style="width: 100%;">
-                    <tr>
-                        <td style="width: 50%; vertical-align: top;"></td>
-                        <td style="width: 50%;">
-                            <table class="totals-table" style="border: 1px solid #dee2e6; border-radius: 6px; background: #fafafa;">
-                                <tr>
-                                    <td>Mal/Hizmet Toplamı:</td>
-                                    <td class="text-end fw-semibold">${payload.grandTotal.toFixed(2)} ${curr}</td>
-                                </tr>
-                                <tr>
-                                    <td>Hesaplanan KDV:</td>
-                                    <td class="text-end fw-semibold">${payload.totalVAT.toFixed(2)} ${curr}</td>
-                                </tr>
-                                <tr style="border-top: 2px solid #0d6efd; background: #f0f7ff;">
-                                    <td style="font-size: 16px; font-weight: 700; color: #0d6efd;">Ödenecek Tutar:</td>
-                                    <td class="text-end" style="font-size: 16px; font-weight: 700; color: #0d6efd;">${payload.paymentTotal.toFixed(2)} ${curr}</td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                </table>
-            </div>
-        </body>
-        </html>
-    `;
+    const previewHtml = generateGibInvoiceHtml(
+        payload,
+        state.userData,
+        state.userCode,
+        state.username
+    );
 
     state.currentPreviewUuid = null;
     state.currentPreviewSigned = false;
@@ -1780,8 +1691,8 @@ function showLocalInvoicePreview(payload: InvoicePayload): void {
 
     const titleEl = document.getElementById("previewModalTitle");
     const subTitleEl = document.getElementById("previewModalSubtitle");
-    if (titleEl) titleEl.textContent = "Taslak Fatura Önizleme";
-    if (subTitleEl) subTitleEl.textContent = "Form verilerinden oluşturulmuş yerel taslak";
+    if (titleEl) titleEl.textContent = "Resmi Taslak Önizleme";
+    if (subTitleEl) subTitleEl.textContent = "GİB resmi e-Arşiv fatura şablonu ile hazırlanmış yerel önizleme";
 
     const iframe = document.getElementById("previewIframe") as HTMLIFrameElement;
     if (iframe) {
@@ -1816,14 +1727,12 @@ async function loadUserData(): Promise<void> {
 
     try {
         const currentUserCode = state.userCode || sessionStorage.getItem("gib_user_code") || localStorage.getItem("gib_user_code") || (document.getElementById("loginUsername") as HTMLInputElement)?.value.trim() || undefined;
-        const res = await fetch("/api/user-data", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ env: state.env, token: state.token, userCode: currentUserCode }),
-        });
-        const json = await res.json();
-        if (json.success && json.data) {
-            const u = json.data as Record<string, unknown>;
+        const client = getGibClient(state.env);
+        const u = await client.getUserData(state.token);
+        if (currentUserCode && !u.userCode) {
+            u.userCode = currentUserCode;
+        }
+        state.userData = u as unknown as Record<string, unknown>;
 
             // Ünvan ve İsim
             const title = String(u.title || u.unvan || "").trim();
@@ -1960,20 +1869,11 @@ async function loadUserData(): Promise<void> {
                     });
                 });
             }
-        } else {
-            const err = json.error || "Mükellef bilgileri alınamadı.";
-            container.innerHTML = `
-                <div class="alert alert-warning mb-0 d-flex justify-content-between align-items-center">
-                    <div><i class="bi bi-exclamation-triangle me-2"></i>${err}</div>
-                    <button class="btn btn-sm btn-outline-warning" id="btnRetryUserData">Tekrar Dene</button>
-                </div>
-            `;
-            document.getElementById("btnRetryUserData")?.addEventListener("click", () => loadUserData());
-        }
-    } catch {
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         container.innerHTML = `
             <div class="alert alert-danger mb-0 d-flex justify-content-between align-items-center">
-                <div><i class="bi bi-exclamation-octagon me-2"></i>Mükellef bilgileri yüklenirken bağlantı hatası oluştu.</div>
+                <div><i class="bi bi-exclamation-octagon me-2"></i>Mükellef bilgileri yüklenemedi: ${msg}</div>
                 <button class="btn btn-sm btn-outline-danger" id="btnRetryUserData">Tekrar Dene</button>
             </div>
         `;
@@ -2407,19 +2307,11 @@ async function cloneInvoice(uuid: string): Promise<void> {
     if (state.token) {
         showToast("Fatura detayları GİB'den alınıyor...", "info");
         try {
-            const res = await fetch("/api/invoices/html", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    env: state.env,
-                    token: state.token,
-                    uuid,
-                    onayDurumu: inv?.onayDurumu || "Onaylanmadı",
-                }),
-            });
-            const data = await res.json();
-            if (data.success && data.html) {
-                const parsed = parseGibInvoiceHtml(data.html);
+            const client = getGibClient(state.env);
+            const isSigned = inv?.onayDurumu === "Onaylandı";
+            const html = await client.getInvoiceHTML(state.token, uuid, isSigned);
+            if (html) {
+                const parsed = parseGibInvoiceHtml(html);
                 if (inv) {
                     if (!parsed.taxIDOrTRID && (inv.aliciVknTckn || inv.vknTckn)) {
                         parsed.taxIDOrTRID = String(inv.aliciVknTckn || inv.vknTckn);
@@ -2727,7 +2619,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnDownloadModal) {
         btnDownloadModal.addEventListener("click", () => {
             if (state.currentPreviewUuid && state.token) {
-                window.location.href = `/api/invoices/download?env=${state.env}&token=${state.token}&uuid=${state.currentPreviewUuid}&signed=${state.currentPreviewSigned}`;
+                const client = getGibClient(state.env);
+                const zipUrl = client.getDownloadURL(state.token, state.currentPreviewUuid, state.currentPreviewSigned);
+                window.open(zipUrl, "_blank");
             }
         });
     }
@@ -2863,18 +2757,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
             btnConfirmCancel.disabled = true;
             try {
-                const res = await fetch("/api/invoices/cancel", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        env: state.env,
-                        token: state.token,
-                        reason,
-                        draftInvoice: state.selectedDraftForCancel,
-                    }),
-                });
-                const d = await res.json();
-                if (!d.success) throw new Error(d.error || "İptal edilemedi.");
+                const client = getGibClient(state.env);
+                await client.cancelDraftInvoice(state.token, reason, state.selectedDraftForCancel);
                 showToast("Taslak fatura iptal edildi.", "success");
 
                 const cancelModalEl = document.getElementById("cancelModal");
@@ -2939,11 +2823,33 @@ document.addEventListener("DOMContentLoaded", () => {
         loadUserData();
     }
 
-    // --- CANLI SUNUCU LOGLARI TAKİBİ ---
+    // --- CANLI İŞLEM LOGLARI TAKİBİ ---
     initLogStream();
 });
 
 let totalLogCount = 0;
+let clientLogCounter = 0;
+
+export function logApp(
+    level: LogLevel,
+    category: LogCategory,
+    message: string,
+    details?: unknown
+): void {
+    const entry = {
+        id: ++clientLogCounter,
+        timestamp: new Date().toLocaleTimeString("tr-TR", { hour12: false }) + "." + String(Date.now() % 1000).padStart(3, "0"),
+        level,
+        category,
+        message,
+        details,
+    };
+    appendLogEntry(entry);
+    const prefix = `[${entry.timestamp}] [${level}] [${category}]`;
+    if (level === "ERROR") console.error(`${prefix} ${message}`, details !== undefined ? details : "");
+    else if (level === "WARN") console.warn(`${prefix} ${message}`, details !== undefined ? details : "");
+    else console.log(`${prefix} ${message}`, details !== undefined ? details : "");
+}
 
 function appendLogEntry(entry: { id: number; timestamp: string; level: string; category: string; message: string; details?: unknown }): void {
     if (!entry || !entry.message) return;
@@ -2994,46 +2900,19 @@ function escapeHtml(text: string): string {
 }
 
 function initLogStream(): void {
-    // 1. Önceki logları REST API ile çek
-    fetch("/api/logs")
-        .then((res) => res.json())
-        .then((data) => {
-            if (data.success && Array.isArray(data.logs)) {
-                data.logs.forEach((log: { id: number; timestamp: string; level: string; category: string; message: string; details?: unknown }) => {
-                    appendLogEntry(log);
-                });
-            }
-        })
-        .catch(() => {});
+    logApp("INFO", "SYSTEM", "Better e-Arşiv Fatura istemci uygulaması hazır. (Sunucusuz Mod)");
 
-    // 2. Server-Sent Events (SSE) ile canlı dinle
-    try {
-        const eventSource = new EventSource("/api/logs/stream");
-        eventSource.onmessage = (event) => {
-            try {
-                const logData = JSON.parse(event.data);
-                appendLogEntry(logData);
-            } catch {}
-        };
-        eventSource.onerror = () => {
-            // SSE bağlantı kesildiğinde tarayıcı otomatik yeniden dener
-        };
-    } catch {}
-
-    // 3. Logları Temizle butonu
+    // Logları Temizle butonu
     const btnClearLogs = document.getElementById("btnClearLogs");
     if (btnClearLogs) {
-        btnClearLogs.addEventListener("click", async () => {
-            try {
-                await fetch("/api/logs/clear", { method: "POST" });
-                const list = document.getElementById("logsList");
-                if (list) list.innerHTML = "";
-                totalLogCount = 0;
-                const badge = document.getElementById("logCountBadge");
-                if (badge) badge.textContent = "0";
-                const placeholder = document.getElementById("emptyLogsPlaceholder");
-                if (placeholder) placeholder.style.display = "block";
-            } catch {}
+        btnClearLogs.addEventListener("click", () => {
+            const list = document.getElementById("logsList");
+            if (list) list.innerHTML = "";
+            totalLogCount = 0;
+            const badge = document.getElementById("logCountBadge");
+            if (badge) badge.textContent = "0";
+            const placeholder = document.getElementById("emptyLogsPlaceholder");
+            if (placeholder) placeholder.style.display = "block";
         });
     }
 }

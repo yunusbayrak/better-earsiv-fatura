@@ -1,21 +1,21 @@
 # Better e-Arşiv Fatura
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js Version](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#katkıda-bulunma-ve-pr-istekleri)
+[![Privacy: Fully Local](https://img.shields.io/badge/Privacy-Fully%20Local-success)](#)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
-Gelir İdaresi Başkanlığı (GİB) e-Arşiv Portalı için geliştirilmiş, hafif, hızlı ve modern bir web arayüzüdür.
+Gelir İdaresi Başkanlığı (GİB) e-Arşiv Portalı için geliştirilmiş, hafif, hızlı, modern ve **%100 istemci tabanlı (client-side)** bir web arayüzüdür.
 
-GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadeleştirerek kullanıcı dostu ve akıcı bir deneyim sunmayı amaçlar.
+GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadeleştirerek kullanıcı dostu ve akıcı bir deneyim sunar.
 
 ---
 
 ## Öne Çıkan Özellikler
 
 ### Çift Ortam Desteği
-- Test Portalı (`earsivportaltest.efatura.gov.tr`) üzerinden deneme faturaları oluşturma.
-- Canlı Portal (`earsivportal.efatura.gov.tr`) üzerinden resmi fatura kesme ve imzalama.
+- **Test Portalı** (`earsivportaltest.efatura.gov.tr`) üzerinden deneme faturaları oluşturma.
+- **Canlı Portal** (`earsivportal.efatura.gov.tr`) üzerinden resmi fatura kesme ve imzalama.
 - İki ortam arasında arayüz üzerinden tek tıkla geçiş yapabilme.
 
 ### Fatura Düzenleme ve Hesaplama
@@ -27,9 +27,9 @@ GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadele
 - **Fatura Klonlama:** Önizlenen veya listedeki bir faturayı tek tıkla form alanlarına kopyalayarak yeni fatura oluşturabilme.
 
 ### Belge ve İndirme İşlemleri
-- **Doğrudan PDF İndirme:** Faturayı resmi A4 formatında PDF olarak indirme. Ağır dış paketler (Puppeteer vb.) gerektirmeden sisteminizdeki yerel tarayıcı (Edge, Chrome, Brave veya Chromium) üzerinden hafif ve hızlı dönüşüm sağlar.
+- **Doğrudan PDF İndirme:** Faturayı resmi A4 formatında PDF olarak tarayıcı üzerinden anında indirme.
 - **ZIP İndirme:** Faturayı GİB'in resmi ZIP formatında indirip arşivleme.
-- **HTML Önizleme ve Yazdırma:** GİB resmi şablonuyla fatura çıktısını modal içerisinde görüntüleme veya ayrı sekmede açarak yazdırma.
+- **HTML Önizleme ve Yazdırma:** GİB resmi şablonuyla fatura çıktısını modal içerisinde görüntüleme veya yazdırma.
 - **Taslak Kaydetme ve İmzalama:** Resmi maliyet doğurmadan taslak oluşturma veya portal oturumuyla doğrudan imzalama.
 - **Taslak İptali:** İptal gerekçesi girerek onaylanmamış taslakları portaldan silebilme.
 
@@ -39,13 +39,13 @@ GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadele
 - **CSV Dışa Aktarma:** Listelenen faturaları Excel uyumlu CSV dosyası olarak dışa aktarma.
 - **Mükellef Bilgileri:** Oturum açılan kullanıcının profil bilgilerini ve kullanıcı kodunu görüntüleme.
 
-### Canlı Sunucu Günlüğü (Logs)
-- GİB API istekleri, yanıtları ve olası hata mesajları Server-Sent Events (SSE) ile anlık olarak arayüzdeki terminal panelinde izlenebilir.
+### Canlı İşlem Günlüğü (Terminal)
+- GİB API istekleri, yanıtları ve olası hata mesajları anlık olarak arayüzdeki terminal panelinde izlenebilir.
 
-### Minimal Bağımlılık ve Tip Güvenliği
-- Ağır önyüz framework'leri veya karmaşık derleyiciler gerektirmez.
-- Sıfır çalışma zamanı (runtime) bağımlılığı: Harici npm bağımlılıkları olmadan yerleşik Node.js API'leri ile çalışır.
-- Hem sunucu hem de istemci tarafı baştan sona TypeScript ile yazılmıştır.
+### %100 İstemci Tabanlı & Sıfır Aracı Sunucu
+- Harici bir backend sunucusuna ihtiyaç duymaz.
+- Tüm istekler doğrudan kullanıcının tarayıcısından GİB sunucularına iletilir.
+- Baştan sona TypeScript ile geliştirilmiştir.
 
 ---
 
@@ -54,7 +54,6 @@ GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadele
 ### Gereksinimler
 - Node.js (v18 veya üzeri)
 - npm
-- PDF oluşturma özelliği için sistemde Chromium tabanlı bir tarayıcı (Microsoft Edge, Google Chrome, Brave vb. — Windows ve macOS sistemlerde varsayılan olarak mevcuttur)
 
 ### 1. Bağımlılıkları Yükleyin
 ```bash
@@ -66,19 +65,19 @@ npm install
 npm run build
 ```
 
-Bu komut hem sunucu TypeScript kodlarını `dist/` klasörüne, hem de istemci kodunu `public/app.js` dosyasına derler.
+Bu komut TypeScript kodlarını doğrudan tarayıcıda çalışan JavaScript dosyalarına derler.
 
-### 3. Sunucuyu Başlatın
+### 3. Çalıştırın
 ```bash
 npm start
 ```
 
-Sunucu varsayılan olarak 3000 portunda başlar. Tarayıcınızda açmak için:
+Tarayıcınızda açmak için:
 [http://localhost:3000](http://localhost:3000)
 
-Geliştirme sırasında otomatik derleme ve çalıştırma için:
+Geliştirme sırasında otomatik izleme (watch) için:
 ```bash
-npm run dev
+npm run watch
 ```
 
 ---
@@ -87,17 +86,16 @@ npm run dev
 
 ```
 better-earsiv/
-├── src/
-│   ├── server.ts         # Yerel Node.js HTTP sunucusu ve API rotaları
-│   ├── gibClient.ts      # GİB e-Arşiv servisleri ile doğrudan haberleşen API istemcisi
-│   └── pdfUtil.ts        # Yerel tarayıcı tabanlı hafif HTML->PDF dönüştürücü
 ├── public/
 │   ├── index.html        # Bootstrap 5 tabanlı arayüz
 │   ├── app.ts            # İstemci durumu ve kullanıcı etkileşimleri (TypeScript)
-│   └── app.js            # Derlenmiş istemci betiği
-├── tsconfig.json         # Sunucu TypeScript yapılandırması
-├── tsconfig.client.json  # İstemci TypeScript yapılandırması
+│   ├── app.js            # Derlenmiş istemci betiği
+│   ├── gibClient.ts      # Doğrudan tarayıcıdan GİB API ile konuşan istemci
+│   ├── gibClient.js      # Derlenmiş GİB istemcisi
+│   └── gibTemplate.ts    # Resmi GİB fatura HTML şablon üreticisi
+├── tsconfig.json         # TypeScript yapılandırması
 ├── package.json          # Proje betikleri ve bağımlılık tanımları
+├── serve.js              # Yerel testler için hafif statik dosya sunucusu
 └── README.md
 ```
 
@@ -105,35 +103,9 @@ better-earsiv/
 
 ## Güvenlik ve Gizlilik
 
-- **Yerel Çalışma:** Bu uygulama yalnızca sizin yerel makinenizde çalışır.
-- **Kimlik Bilgileri Saklanmaz:** GİB kullanıcı kodunuz ve parolanız hiçbir yerel veya uzak veritabanına kaydedilmez. Bilgiler yalnızca ilgili oturum boyunca GİB sunucularıyla güvenli iletişim kurmak amacıyla oturum belleğinde (`sessionStorage`) tutulur.
+- **Doğrudan İstemci İletişimi:** GİB kimlik bilgileriniz hiçbir aracı veya üçüncü parti sunucuya iletilmez. Tüm API istekleri doğrudan tarayıcınızdan GİB sunucularına (`https://earsivportal.efatura.gov.tr`) gönderilir.
+- **Kimlik Bilgileri Saklanmaz:** GİB kullanıcı kodunuz ve parolanız hiçbir veritabanına kaydedilmez. Bilgiler yalnızca ilgili tarayıcı sekmesi boyunca oturum belleğinde (`sessionStorage`) tutulur.
 - **Resmi İşlem Sorumluluğu:** Canlı (PROD) portalda imzalanan belgeler yasal olarak geçerli e-Arşiv faturalarıdır. İşlem yaparken doğru ortamda olduğunuza dikkat ediniz.
-
----
-
-## Katkıda Bulunma ve PR İstekleri
-
-Projeye katkıda bulunmak isteyen herkesin Pull Request (PR) ve Issue bildirimleri memnuniyetle karşılanır. Geliştirme sürecinin düzenli ve güvenli ilerlemesi için lütfen aşağıdaki adımları ve kuralları göz önünde bulundurunuz:
-
-### PR Süreci
-1. **Fork Edin:** Projeyi kendi GitHub hesabınıza fork'layın.
-2. **Branch Oluşturun:** Yapacağınız geliştirmeye uygun yeni bir branch açın:
-   ```bash
-   git checkout -b feature/yeni-ozellik
-   # veya
-   git checkout -b fix/hata-cozumu
-   ```
-3. **Geliştirme ve Test:** Değişikliklerinizi yapın ve projenin derlendiğinden emin olun:
-   ```bash
-   npm run build
-   ```
-4. **Commit:** Sade, anlaşılır ve konvansiyonel commit mesajları kullanın (örn: `feat: ...`, `fix: ...`).
-5. **Pull Request Gönderin:** Değişikliğin neyi amaçladığını ve nasıl test edildiğini açıklayan bir PR oluşturun.
-
-### Dikkat Edilmesi Gerekenler
-- **Kişisel Veri Güvenliği:** PR içeriğinde kesinlikle gerçek TCKN, VKN, kullanıcı adı, parola, gerçek fatura verisi veya kişisel HTML çıktıları bulunmamalıdır.
-- **Minimal Bağımlılık Prensibi:** Projenin temel hedefi hafif ve yalın kalmaktır; gereksiz dış paket eklemelerinden kaçınınız.
-- **Tip Güvenliği:** Hem sunucu hem de istemci tarafındaki TypeScript tip kurallarına uyulmalı ve `npm run build` komutunun sıfır hata ile tamamlanması sağlanmalıdır.
 
 ---
 

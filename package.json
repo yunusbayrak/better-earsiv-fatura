@@ -4,11 +4,10 @@
   "description": "GİB e-Arşiv Fatura Portalı Basit ve Modern Arayüzü",
   "type": "module",
   "scripts": {
-    "build:client": "tsc -p tsconfig.client.json",
-    "build:server": "tsc -p tsconfig.json",
-    "build": "npm run build:client && npm run build:server",
-    "start": "node dist/server.js",
-    "dev": "npm run build:client && node dist/server.js"
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node serve.js",
+    "dev": "node serve.js"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

@@ -1,0 +1,2 @@
+/gib-proxy/test/*  https://earsivportaltest.efatura.gov.tr/earsiv-services/:splat  200!
+/gib-proxy/prod/*  https://earsivportal.efatura.gov.tr/earsiv-services/:splat  200!
