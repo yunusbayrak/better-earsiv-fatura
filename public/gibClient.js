@@ -37,24 +37,31 @@ export class GibClient {
         this.baseURL = BASE_URLS[env] || BASE_URLS.PROD;
         this.logger = logger;
     }
-    /** İstekleri gönderir; Netlify proxy yapılandırılmışsa hata durumunda ters proxy'ye geri düşer */
+    useProxy = false;
+    /** İstekleri gönderir; CORS durumunda proxy'e düşer ve yapışkan kalır */
     async doFetch(path, options) {
+        const proxyPath = `/gib-proxy/${this.env.toLowerCase()}${path.replace(/^\/earsiv-services/, "")}`;
+        const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+        const fetchOpts = { ...options };
+        if (!fetchOpts.signal && typeof AbortSignal !== "undefined" && AbortSignal.timeout) {
+            fetchOpts.signal = AbortSignal.timeout(30000); // 30 seconds default timeout
+        }
+        // Eğer proxy moduna geçtiysek (sticky) doğrudan proxy dene
+        if (this.useProxy && !isLocal) {
+            return await fetch(proxyPath, fetchOpts);
+        }
         try {
-            return await fetch(`${this.baseURL}${path}`, options);
+            const res = await fetch(`${this.baseURL}${path}`, fetchOpts);
+            // GİB bazen CORS hatası vermez ama opacity response veya yönlendirme dönebilir
+            if (!res.ok && res.status === 0)
+                throw new TypeError("Failed to fetch");
+            return res;
         }
         catch (err) {
-            // Eğer doğrudan bağlantı ağ veya CORS engeline takılırsa ve Netlify/Vercel üzerindeysek proxy dene
-            if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-                const proxyPath = `/gib-proxy/${this.env.toLowerCase()}${path.replace(/^\/earsiv-services/, "")}`;
-                try {
-                    this.logger?.("WARN", "HTTP", `Doğrudan bağlantı başarısız oldu, ters proxy deneniyor: ${proxyPath}`);
-                    const proxyRes = await fetch(proxyPath, options);
-                    if (proxyRes.ok)
-                        return proxyRes;
-                }
-                catch {
-                    // İlk hatayı fırlat
-                }
+            if (!isLocal && (err instanceof TypeError || (err instanceof Error && err.name !== "TimeoutError"))) {
+                this.logger?.("WARN", "HTTP", `Doğrudan bağlantı başarısız oldu, CORS nedeniyle proxy'e düşülüyor (Sticky Mod): ${proxyPath}`);
+                this.useProxy = true; // Bundan sonraki tüm istekler proxy üzerinden gitsin
+                return await fetch(proxyPath, fetchOpts);
             }
             throw err;
         }
@@ -377,51 +384,26 @@ export class GibClient {
         };
         let draftResult = null;
         let lastCreateError = "";
-        // Deneme 1: faturaUuid: "" ile oluşturma
         try {
-            this.logger?.("INFO", "GIB", `[Deneme 1] EARSIV_PORTAL_FATURA_OLUSTUR gönderiliyor (faturaUuid: "")...`);
-            const payload1 = { ...baseInvoiceData, faturaUuid: "" };
-            const resDraft1 = await this.runCommand(token, "EARSIV_PORTAL_FATURA_OLUSTUR", "RG_BASITFATURA", payload1);
-            const resText1 = typeof resDraft1.data === "string" ? resDraft1.data.trim() : JSON.stringify(resDraft1.data || "");
-            this.logger?.("INFO", "GIB", `GİB Yanıtı (Deneme 1): ${resText1}`);
-            if (/başarıyla oluşturulmuştur/i.test(resText1) || !resDraft1.data) {
+            this.logger?.("INFO", "GIB", `EARSIV_PORTAL_FATURA_OLUSTUR gönderiliyor (faturaUuid: "${generatedUuid}")...`);
+            const payload = { ...baseInvoiceData, faturaUuid: generatedUuid, ettn: generatedUuid };
+            const resDraft = await this.runCommand(token, "EARSIV_PORTAL_FATURA_OLUSTUR", "RG_BASITFATURA", payload);
+            const resText = typeof resDraft.data === "string" ? resDraft.data.trim() : JSON.stringify(resDraft.data || "");
+            this.logger?.("INFO", "GIB", `GİB Yanıtı: ${resText}`);
+            if (/başarıyla oluşturulmuştur/i.test(resText)) {
                 draftResult = {
                     date,
                     uuid: generatedUuid,
-                    data: resDraft1.data || "Fatura başarıyla oluşturulmuştur.",
+                    data: resDraft.data,
                 };
             }
             else {
-                lastCreateError = resText1;
+                lastCreateError = resText || "Beklenmeyen API yanıtı";
             }
         }
-        catch (err1) {
-            lastCreateError = err1 instanceof Error ? err1.message : String(err1);
-            this.logger?.("WARN", "GIB", `Deneme 1 başarısız: ${lastCreateError}`);
-        }
-        // Deneme 2 Fallback: faturaUuid & ettn = generatedUuid
-        if (!draftResult) {
-            try {
-                this.logger?.("INFO", "GIB", `[Deneme 2] EARSIV_PORTAL_FATURA_OLUSTUR gönderiliyor (faturaUuid: "${generatedUuid}")...`);
-                const payload2 = { ...baseInvoiceData, faturaUuid: generatedUuid, ettn: generatedUuid };
-                const resDraft2 = await this.runCommand(token, "EARSIV_PORTAL_FATURA_OLUSTUR", "RG_BASITFATURA", payload2);
-                const resText2 = typeof resDraft2.data === "string" ? resDraft2.data.trim() : JSON.stringify(resDraft2.data || "");
-                this.logger?.("INFO", "GIB", `GİB Yanıtı (Deneme 2): ${resText2}`);
-                if (/başarıyla oluşturulmuştur/i.test(resText2)) {
-                    draftResult = {
-                        date,
-                        uuid: generatedUuid,
-                        data: resDraft2.data,
-                    };
-                }
-                else {
-                    lastCreateError = resText2;
-                }
-            }
-            catch (err2) {
-                lastCreateError = err2 instanceof Error ? err2.message : String(err2);
-                this.logger?.("ERROR", "GIB", `Deneme 2 başarısız: ${lastCreateError}`);
-            }
+        catch (err) {
+            lastCreateError = err instanceof Error ? err.message : String(err);
+            this.logger?.("ERROR", "GIB", `Fatura oluşturma başarısız: ${lastCreateError}`);
         }
         if (!draftResult) {
             throw new Error(lastCreateError || "Fatura taslağı oluşturulamadı.");

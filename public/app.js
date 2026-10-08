@@ -1,8 +1,11 @@
 // e-Arşiv Fatura Arayüzü TypeScript İstemci Mantığı (Sunucusuz / 100% Client-Side)
-import { generateGibInvoiceHtml } from "./gibTemplate.js";
 import { GibClient } from "./gibClient.js";
+const gibClients = {};
 function getGibClient(env = state.env) {
-    return new GibClient(env, logApp);
+    if (!gibClients[env]) {
+        gibClients[env] = new GibClient(env, logApp);
+    }
+    return gibClients[env];
 }
 // Fatura HTML'ini ekranda ve yazdırmada gerçek A4 sayfa formatında (210mm x 297mm) sunar
 function formatInvoiceHtmlForA4Preview(html) {
@@ -173,10 +176,10 @@ function showToast(message, type = "info") {
     toastBody.innerHTML = `
         <div class="d-flex align-items-center gap-2">
             ${icons[type] || icons.info}
-            <div class="fw-medium small">${message}</div>
+            <div class="fw-medium small">${escapeHtml(message)}</div>
         </div>
     `;
-    const toast = new bootstrap.Toast(toastEl);
+    const toast = bootstrap.Toast.getOrCreateInstance(toastEl);
     toast.show();
 }
 // Hızlı Tarih Butonu Vurgulayıcı
@@ -329,8 +332,8 @@ function updateSessionUI() {
     }
     if (sessionContainer) {
         if (state.token) {
-            const code = state.userCode || sessionStorage.getItem("gib_user_code") || localStorage.getItem("gib_user_code");
-            const displayName = state.username || code || "Kullanıcı";
+            const code = escapeHtml(state.userCode || sessionStorage.getItem("gib_user_code") || localStorage.getItem("gib_user_code") || "");
+            const displayName = escapeHtml(state.username || code || "Kullanıcı");
             const showUserCodeBadge = Boolean(code && displayName && displayName !== code);
             sessionContainer.innerHTML = `
                 <span class="text-light small me-2">
@@ -438,12 +441,13 @@ function renderItems() {
         }
         return;
     }
-    state.items.forEach((item, index) => {
+    const fragment = document.createDocumentFragment();
+    state.items.forEach((item) => {
         const tr = document.createElement("tr");
         tr.id = `row-${item.id}`;
         tr.innerHTML = `
             <td>
-                <input type="text" class="form-control form-control-sm item-name" data-id="${item.id}" value="${item.name}" placeholder="Ürün veya Hizmet Tanımı" required>
+                <input type="text" class="form-control form-control-sm item-name" data-id="${item.id}" value="${escapeHtml(item.name)}" placeholder="Ürün veya Hizmet Tanımı" required>
             </td>
             <td>
                 <input type="number" step="any" min="0" class="form-control form-control-sm item-qty" data-id="${item.id}" value="${item.quantity}" required>
@@ -482,31 +486,34 @@ function renderItems() {
                 </button>
             </td>
         `;
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
     });
-    // Olay dinleyicilerini bağla
-    tbody.querySelectorAll(".item-name").forEach((el) => {
-        el.addEventListener("input", (e) => updateItem(e.target.dataset.id, "name", e.target.value));
-    });
-    tbody.querySelectorAll(".item-qty").forEach((el) => {
-        el.addEventListener("input", (e) => updateItem(e.target.dataset.id, "quantity", e.target.value));
-    });
-    tbody.querySelectorAll(".item-unit").forEach((el) => {
-        el.addEventListener("change", (e) => updateItem(e.target.dataset.id, "unitType", e.target.value));
-    });
-    tbody.querySelectorAll(".item-price").forEach((el) => {
-        el.addEventListener("input", (e) => updateItem(e.target.dataset.id, "unitPrice", e.target.value));
-    });
-    tbody.querySelectorAll(".item-vat").forEach((el) => {
-        el.addEventListener("change", (e) => updateItem(e.target.dataset.id, "vatRate", e.target.value));
-    });
-    tbody.querySelectorAll(".btn-delete-item").forEach((el) => {
-        el.addEventListener("click", (e) => {
-            const btn = e.target.closest(".btn-delete-item");
-            if (btn && btn.dataset.id)
-                deleteItem(btn.dataset.id);
+    tbody.innerHTML = "";
+    tbody.appendChild(fragment);
+    if (!tbody.dataset.delegated) {
+        tbody.dataset.delegated = "true";
+        tbody.addEventListener("input", (e) => {
+            const target = e.target;
+            if (target.classList.contains("item-name"))
+                updateItem(target.dataset.id, "name", target.value);
+            else if (target.classList.contains("item-qty"))
+                updateItem(target.dataset.id, "quantity", target.value);
+            else if (target.classList.contains("item-price"))
+                updateItem(target.dataset.id, "unitPrice", target.value);
         });
-    });
+        tbody.addEventListener("change", (e) => {
+            const target = e.target;
+            if (target.classList.contains("item-unit"))
+                updateItem(target.dataset.id, "unitType", target.value);
+            else if (target.classList.contains("item-vat"))
+                updateItem(target.dataset.id, "vatRate", target.value);
+        });
+        tbody.addEventListener("click", (e) => {
+            const btnDelete = e.target.closest(".btn-delete-item");
+            if (btnDelete?.dataset.id)
+                deleteItem(btnDelete.dataset.id);
+        });
+    }
 }
 // Genel Toplamları ve Özeti Güncelle
 function updateSummary() {
@@ -831,7 +838,7 @@ async function handleCreateInvoice(sign) {
         showToast("Fatura kesmek için lütfen önce giriş yapınız.", "warning");
         const modalEl = document.getElementById("loginModal");
         if (modalEl)
-            new bootstrap.Modal(modalEl).show();
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
         return;
     }
     const payload = getInvoicePayload();
@@ -901,7 +908,7 @@ async function previewInvoiceHtml(uuid, onayDurumu = "Onaylanmadı", belgeNo) {
         overlayText.textContent = "Fatura HTML verisi GİB'den alınıyor...";
     const modalEl = document.getElementById("previewModal");
     if (modalEl)
-        new bootstrap.Modal(modalEl).show();
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
     try {
         const client = getGibClient(state.env);
         const html = await client.getInvoiceHTML(state.token, uuid, isSigned);
@@ -938,6 +945,7 @@ function openPreviewInNewTab() {
     const blob = new Blob([a4Html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 // Önizleme Modalında Tam Ekran Geçişi
 function toggleFullscreenPreview() {
@@ -1108,24 +1116,25 @@ function renderInvoicesTable() {
             <tr>
                 <td colspan="6" class="text-center py-4 text-muted">
                     <i class="bi bi-folder2-open fs-2 d-block mb-2"></i>
-                    ${query ? `"${query}" aramasına uygun fatura bulunamadı.` : "Belirtilen tarih aralığında fatura bulunamadı."}
+                    ${query ? `"${escapeHtml(query)}" aramasına uygun fatura bulunamadı.` : "Belirtilen tarih aralığında fatura bulunamadı."}
                 </td>
             </tr>
         `;
         return;
     }
-    tbody.innerHTML = "";
+    const fragment = document.createDocumentFragment();
     filteredInvoices.forEach((inv) => {
-        const ettn = (inv.ettn || inv.uuid || "-");
-        const rawBelgeNo = (inv.belgeNumarasi || "").toString().trim();
+        const ettn = escapeHtml((inv.ettn || inv.uuid || "-"));
+        const rawBelgeNo = escapeHtml((inv.belgeNumarasi || "").toString().trim());
         const belgeNo = rawBelgeNo || "Taslak";
         // GİB response: belgeTarihi = "06-10-2026" veya faturaTarihi
-        const tarih = (inv.belgeTarihi || inv.faturaTarihi || inv.date || "-");
+        const tarih = escapeHtml((inv.belgeTarihi || inv.faturaTarihi || inv.date || "-"));
         // GİB response: aliciUnvanAdSoyad veya aliciUnvan
-        const aliciUnvan = (inv.aliciUnvanAdSoyad || inv.aliciUnvan || `${inv.aliciAdi || ""} ${inv.aliciSoyadi || ""}`.trim() || "-");
-        const aliciVkn = (inv.aliciVknTckn || inv.vknTckn || "");
-        const belgeTuru = (inv.belgeTuru || "FATURA");
-        const tutarVal = inv.odenecek ?? inv.toplamTutar ?? inv.faturaTutari ?? inv.odenecekTutar ?? inv.malHizmetToplamTutari ?? inv.tutar;
+        const aliciUnvan = escapeHtml((inv.aliciUnvanAdSoyad || inv.aliciUnvan || `${inv.aliciAdi || ""} ${inv.aliciSoyadi || ""}`.trim() || "-"));
+        const aliciVkn = escapeHtml((inv.aliciVknTckn || inv.vknTckn || ""));
+        const belgeTuru = escapeHtml((inv.belgeTuru || "FATURA"));
+        const rawTutarVal = inv.odenecek ?? inv.toplamTutar ?? inv.faturaTutari ?? inv.odenecekTutar ?? inv.malHizmetToplamTutari ?? inv.tutar;
+        const tutarVal = typeof rawTutarVal === "string" ? escapeHtml(rawTutarVal) : rawTutarVal;
         const hasTutar = tutarVal !== undefined && tutarVal !== null && tutarVal !== "" && tutarVal !== "-";
         // Onay Durumu ("Onaylandı" / "Onaylanmadı" / "Silinmiş")
         const rawOnay = String(inv.onayDurumu || "Taslak").trim();
@@ -1221,105 +1230,83 @@ function renderInvoicesTable() {
                 </div>
             </td>
         `;
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
     });
-    // 1. Yeni Fatura Olarak Kopyala Dinleyicisi
-    tbody.querySelectorAll(".btn-action-clone").forEach((el) => {
-        el.addEventListener("click", (e) => {
-            const btn = e.target.closest(".btn-action-clone");
-            if (btn && btn.dataset.uuid) {
-                cloneInvoice(btn.dataset.uuid);
-            }
-        });
-    });
-    // 2. HTML Önizle Dinleyicisi
-    tbody.querySelectorAll(".btn-action-view").forEach((el) => {
-        el.addEventListener("click", (e) => {
-            const btn = e.target.closest(".btn-action-view");
-            if (btn && btn.dataset.uuid) {
-                previewInvoiceHtml(btn.dataset.uuid, btn.dataset.onay || "Onaylanmadı", btn.dataset.belgeno);
-            }
-        });
-    });
-    // 2. Taslak Detay Bilgisi Dinleyicisi
-    tbody.querySelectorAll(".btn-action-view-draft").forEach((el) => {
-        el.addEventListener("click", (e) => {
-            const btn = e.target.closest(".btn-action-view-draft");
-            const uuid = btn?.dataset.uuid;
-            const item = state.invoices.find((i) => (i.ettn || i.uuid) === uuid);
-            if (item)
-                showDraftDetailModal(item);
-        });
-    });
-    // 3. Ham JSON Dinleyicisi
-    tbody.querySelectorAll(".btn-action-json").forEach((el) => {
-        el.addEventListener("click", (e) => {
-            const btn = e.target.closest(".btn-action-json");
-            const uuid = btn?.dataset.uuid;
-            const item = state.invoices.find((i) => (i.ettn || i.uuid) === uuid);
-            if (item)
-                showJsonModal(item);
-        });
-    });
-    // 4. İmzala Dinleyicisi
-    tbody.querySelectorAll(".btn-action-sign").forEach((el) => {
-        el.addEventListener("click", async (e) => {
-            const btn = e.target.closest(".btn-action-sign");
-            const uuid = btn?.dataset.uuid;
-            const inv = state.invoices.find((i) => (i.ettn || i.uuid) === uuid);
-            if (!uuid || !state.token)
+    tbody.innerHTML = "";
+    tbody.appendChild(fragment);
+    // Event Delegation for tbody
+    if (!tbody.dataset.delegated) {
+        tbody.dataset.delegated = "true";
+        tbody.addEventListener("click", async (e) => {
+            const target = e.target;
+            // 1. Yeni Fatura Olarak Kopyala
+            const btnClone = target.closest(".btn-action-clone");
+            if (btnClone?.dataset.uuid) {
+                cloneInvoice(btnClone.dataset.uuid);
                 return;
-            const confirmMsg = state.env === "PROD"
-                ? `DİKKAT: CANLI (PROD) ortamda bu faturayı imzalamak üzeresiniz!\nETTN: ${uuid}\nBu resmi bir mali onay işlemidir. Devam etmek istiyor musunuz?`
-                : `Bu taslak faturayı imzalamak istiyor musunuz?\nETTN: ${uuid}`;
-            if (confirm(confirmMsg)) {
-                try {
-                    showToast("Fatura imzalanıyor...", "info");
-                    const client = getGibClient(state.env);
-                    await client.signDraftInvoice(state.token, inv || { ettn: uuid });
-                    showToast("Fatura başarıyla imzalandı!", "success");
-                    handleListInvoices();
+            }
+            // 2. HTML Önizle
+            const btnView = target.closest(".btn-action-view");
+            if (btnView?.dataset.uuid) {
+                previewInvoiceHtml(btnView.dataset.uuid, btnView.dataset.onay || "Onaylanmadı", btnView.dataset.belgeno);
+                return;
+            }
+            // 3. Ham JSON Göster
+            const btnJson = target.closest(".btn-action-json");
+            if (btnJson?.dataset.uuid) {
+                const item = state.invoices.find((i) => (i.ettn || i.uuid) === btnJson.dataset.uuid);
+                if (item)
+                    showJsonModal(item);
+                return;
+            }
+            // 4. İmzala
+            const btnSign = target.closest(".btn-action-sign");
+            if (btnSign?.dataset.uuid && state.token) {
+                const uuid = btnSign.dataset.uuid;
+                const inv = state.invoices.find((i) => (i.ettn || i.uuid) === uuid);
+                const confirmMsg = state.env === "PROD"
+                    ? `DİKKAT: CANLI (PROD) ortamda bu faturayı imzalamak üzeresiniz!\nETTN: ${uuid}\nBu resmi bir mali onay işlemidir. Devam etmek istiyor musunuz?`
+                    : `Bu taslak faturayı imzalamak istiyor musunuz?\nETTN: ${uuid}`;
+                if (confirm(confirmMsg)) {
+                    try {
+                        showToast("Fatura imzalanıyor...", "info");
+                        const client = getGibClient(state.env);
+                        await client.signDraftInvoice(state.token, inv || { ettn: uuid });
+                        showToast("Fatura başarıyla imzalandı!", "success");
+                        handleListInvoices();
+                    }
+                    catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        showToast(`İmza Hatası: ${msg}`, "danger");
+                    }
                 }
-                catch (err) {
-                    const msg = err instanceof Error ? err.message : String(err);
-                    showToast(`İmza Hatası: ${msg}`, "danger");
-                }
+                return;
+            }
+            // 5. İptal / Sil
+            const btnCancel = target.closest(".btn-action-cancel");
+            if (btnCancel?.dataset.uuid) {
+                state.selectedDraftForCancel = state.invoices.find((i) => (i.ettn || i.uuid) === btnCancel.dataset.uuid) || null;
+                const modalEl = document.getElementById("cancelModal");
+                if (modalEl)
+                    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+                return;
+            }
+            // 6. ETTN Kopyalama
+            const btnCopy = target.closest(".btn-copy-ettn");
+            if (btnCopy?.dataset.copy) {
+                e.stopPropagation();
+                navigator.clipboard.writeText(btnCopy.dataset.copy).then(() => {
+                    const icon = btnCopy.querySelector("i");
+                    if (icon) {
+                        icon.className = "bi bi-check2 text-success fw-bold";
+                        setTimeout(() => { icon.className = "bi bi-clipboard"; }, 1500);
+                    }
+                    showToast("ETTN panoya kopyalandı!", "success");
+                }).catch(() => showToast("Panoya kopyalanamadı.", "warning"));
+                return;
             }
         });
-    });
-    // 5. İptal / Sil Dinleyicisi
-    tbody.querySelectorAll(".btn-action-cancel").forEach((el) => {
-        el.addEventListener("click", (e) => {
-            const btn = e.target.closest(".btn-action-cancel");
-            const uuid = btn?.dataset.uuid;
-            state.selectedDraftForCancel = state.invoices.find((i) => (i.ettn || i.uuid) === uuid) || null;
-            const modalEl = document.getElementById("cancelModal");
-            if (modalEl)
-                new bootstrap.Modal(modalEl).show();
-        });
-    });
-    // 6. ETTN Kopyalama Butonu Dinleyicisi
-    tbody.querySelectorAll(".btn-copy-ettn").forEach((el) => {
-        el.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const btn = e.target.closest(".btn-copy-ettn");
-            const text = btn?.dataset.copy;
-            if (!text)
-                return;
-            navigator.clipboard.writeText(text).then(() => {
-                const icon = btn.querySelector("i");
-                if (icon) {
-                    icon.className = "bi bi-check2 text-success fw-bold";
-                    setTimeout(() => {
-                        icon.className = "bi bi-clipboard";
-                    }, 1500);
-                }
-                showToast("ETTN panoya kopyalandı!", "success");
-            }).catch(() => {
-                showToast("Panoya kopyalanamadı.", "warning");
-            });
-        });
-    });
+    }
 }
 // Faturaları CSV Formatında Dışa Aktar (UTF-8 BOM ile Excel uyumlu)
 function exportInvoicesToCsv() {
@@ -1340,7 +1327,9 @@ function exportInvoicesToCsv() {
     const escapeCsv = (str) => {
         if (str === undefined || str === null)
             return '""';
-        const s = typeof str === "object" ? JSON.stringify(str) : String(str);
+        let s = typeof str === "object" ? JSON.stringify(str) : String(str);
+        if (/^[=+\-@]/.test(s))
+            s = "'" + s;
         return `"${s.replace(/"/g, '""')}"`;
     };
     const rows = state.invoices.map((inv) => {
@@ -1385,7 +1374,7 @@ function showJsonModal(data) {
         pre.textContent = JSON.stringify(data, null, 2);
     const modalEl = document.getElementById("jsonModal");
     if (modalEl)
-        new bootstrap.Modal(modalEl).show();
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 // Taslak Belge Bilgi Modalı Göster
 function showDraftDetailModal(item) {
@@ -1393,12 +1382,12 @@ function showDraftDetailModal(item) {
     const content = document.getElementById("draftDetailModalContent");
     if (!content)
         return;
-    const ettn = String(item.ettn || item.uuid || "-");
-    const tarih = String(item.belgeTarihi || item.faturaTarihi || "-");
-    const alici = String(item.aliciUnvanAdSoyad || item.aliciUnvan || "-");
-    const vkn = String(item.aliciVknTckn || item.vknTckn || "-");
-    const belgeTuru = String(item.belgeTuru || "FATURA");
-    const onay = String(item.onayDurumu || "Onaylanmadı");
+    const ettn = escapeHtml(String(item.ettn || item.uuid || "-"));
+    const tarih = escapeHtml(String(item.belgeTarihi || item.faturaTarihi || "-"));
+    const alici = escapeHtml(String(item.aliciUnvanAdSoyad || item.aliciUnvan || "-"));
+    const vkn = escapeHtml(String(item.aliciVknTckn || item.vknTckn || "-"));
+    const belgeTuru = escapeHtml(String(item.belgeTuru || "FATURA"));
+    const onay = escapeHtml(String(item.onayDurumu || "Onaylanmadı"));
     content.innerHTML = `
         <div class="alert alert-warning py-2 px-3 small mb-3">
             <i class="bi bi-info-circle-fill me-1"></i>
@@ -1417,12 +1406,14 @@ function showDraftDetailModal(item) {
     `;
     const modalEl = document.getElementById("draftDetailModal");
     if (modalEl)
-        new bootstrap.Modal(modalEl).show();
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 // Form İçin Yerel Fatura Taslak Önizlemesi (Resmi GİB sample.html Şablonu)
-function showLocalInvoicePreview(payload) {
+async function showLocalInvoicePreview(payload) {
     if (!payload)
         return;
+    showToast("Önizleme hazırlanıyor...", "info");
+    const { generateGibInvoiceHtml } = await import("./gibTemplate.js");
     const previewHtml = generateGibInvoiceHtml(payload, state.userData, state.userCode, state.username);
     state.currentPreviewUuid = null;
     state.currentPreviewSigned = false;
@@ -1440,7 +1431,7 @@ function showLocalInvoicePreview(payload) {
     }
     const modalEl = document.getElementById("previewModal");
     if (modalEl)
-        new bootstrap.Modal(modalEl).show();
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 // 7. Kullanıcı Verilerini Yükle
 async function loadUserData() {
@@ -1476,20 +1467,20 @@ async function loadUserData() {
         const name = String(u.name || u.ad || u.adi || "").trim();
         const surname = String(u.surname || u.soyad || u.soyadi || "").trim();
         const fullName = [name, surname].filter(Boolean).join(" ");
-        const displayTitle = title || fullName || "-";
+        const displayTitle = escapeHtml(title || fullName || "-");
         // VKN / TCKN
-        const taxId = String(u.taxIDOrTRID || u.vknTckn || u.vergiKimlikNo || "").trim() || "-";
+        const taxId = escapeHtml(String(u.taxIDOrTRID || u.vknTckn || u.vergiKimlikNo || "").trim() || "-");
         // Vergi Dairesi
-        const taxOffice = String(u.taxOffice || u.vergiDairesi || "").trim() || "-";
+        const taxOffice = escapeHtml(String(u.taxOffice || u.vergiDairesi || "").trim() || "-");
         // İletişim
         const phone = String(u.phoneNumber || u.telNo || "").trim();
         const email = String(u.email || u.ePostaAdresi || "").trim();
-        const contactInfo = [phone, email].filter(Boolean).join(" / ") || "-";
+        const contactInfo = escapeHtml([phone, email].filter(Boolean).join(" / ") || "-");
         // Web sitesi
-        const web = String(u.webSite || u.webSitesiAdresi || "").trim();
+        const web = escapeHtml(String(u.webSite || u.webSitesiAdresi || "").trim());
         // Sicil / Mersis
-        const registryNo = String(u.registryNo || u.sicilNo || "").trim();
-        const mersisNo = String(u.mersisNo || "").trim();
+        const registryNo = escapeHtml(String(u.registryNo || u.sicilNo || "").trim());
+        const mersisNo = escapeHtml(String(u.mersisNo || "").trim());
         // Adres parçaları
         const street = String(u.fullAddress || u.cadde || u.caddeSokak || "").trim();
         const bldName = String(u.buildingName || u.apartmanAdi || "").trim();
@@ -1517,19 +1508,20 @@ async function loadUserData() {
             addrParts.push(zip);
         if (country)
             addrParts.push(country);
-        const displayAddress = addrParts.join(" ") || "-";
+        const displayAddress = escapeHtml(addrParts.join(" ") || "-");
         // Kullanıcı Kodu (Login olurken kullanılan değer)
         const inputLoginVal = document.getElementById("loginUsername")?.value.trim();
-        const userCode = String(u.userCode || "").trim() ||
+        const userCodeRaw = String(u.userCode || "").trim() ||
             state.userCode ||
             sessionStorage.getItem("gib_user_code") ||
             localStorage.getItem("gib_user_code") ||
             inputLoginVal ||
             "-";
-        if (userCode && userCode !== "-") {
-            state.userCode = userCode;
-            sessionStorage.setItem("gib_user_code", userCode);
-            localStorage.setItem("gib_user_code", userCode);
+        const userCode = escapeHtml(userCodeRaw);
+        if (userCodeRaw && userCodeRaw !== "-") {
+            state.userCode = userCodeRaw;
+            sessionStorage.setItem("gib_user_code", userCodeRaw);
+            localStorage.setItem("gib_user_code", userCodeRaw);
         }
         // Navbar'daki kullanıcı adını da güncelle
         if (displayTitle && displayTitle !== "-") {
