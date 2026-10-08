@@ -16,93 +16,70 @@ function getGibClient(env: EnvironmentKey = state.env): GibClient {
     return new GibClient(env, logApp);
 }
 
-function prepareInvoiceHtmlForPdf(rawHtml: string): string {
-    const printStyles = `
-    <style id="better-earsiv-pdf-print-style">
+// Fatura HTML'ini ekranda ve yazdırmada gerçek A4 sayfa formatında (210mm x 297mm) sunar
+function formatInvoiceHtmlForA4Preview(html: string): string {
+    const a4Styles = `
+    <style id="better-earsiv-a4-style">
         @page {
             size: A4 portrait;
-            margin: 8mm 6mm 8mm 6mm;
+            margin: 0;
         }
-        @media print {
-            body {
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
+        @media screen {
+            html {
+                background-color: #525659 !important;
+                padding: 24px 0 !important;
+                min-height: 100vh !important;
+                box-sizing: border-box !important;
+                display: flex !important;
+                justify-content: center !important;
+            }
+            body#mainbody, #mainbody {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                max-width: 210mm !important;
+                margin: 0 auto !important;
+                padding: 12mm 10mm !important;
                 background-color: #ffffff !important;
-                color: #000000 !important;
-                font-family: Arial, "Helvetica Neue", Helvetica, sans-serif !important;
+                box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.1) !important;
+                box-sizing: border-box !important;
             }
             table {
-                page-break-inside: avoid;
-            }
-            .no-print {
-                display: none !important;
+                max-width: 100% !important;
             }
         }
-        html, body {
-            margin: 0;
-            padding: 0;
-            background-color: #ffffff;
+        @media print {
+            html {
+                background-color: #ffffff !important;
+                padding: 0 !important;
+            }
+            body#mainbody, #mainbody {
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 8mm 6mm !important;
+                background-color: #ffffff !important;
+                box-shadow: none !important;
+            }
         }
     </style>
     `;
-    if (rawHtml.includes("</head>")) {
-        return rawHtml.replace("</head>", `${printStyles}\n</head>`);
+    if (html.includes("</head>")) {
+        return html.replace("</head>", `${a4Styles}\n</head>`);
     }
-    return `${printStyles}\n${rawHtml}`;
+    return `${a4Styles}\n${html}`;
 }
 
-async function generatePdfFromHtml(rawHtml: string, filename: string): Promise<void> {
-    const styledHtml = prepareInvoiceHtmlForPdf(rawHtml);
-
-    // 1. html2pdf kütüphanesi mevcutsa (CDN)
-    const globalHtml2Pdf = (window as unknown as { html2pdf?: unknown }).html2pdf;
-    if (typeof globalHtml2Pdf === "function") {
-        const tempDiv = document.createElement("div");
-        tempDiv.style.position = "fixed";
-        tempDiv.style.left = "-9999px";
-        tempDiv.style.top = "0";
-        tempDiv.style.width = "210mm";
-        tempDiv.style.backgroundColor = "#ffffff";
-        tempDiv.innerHTML = styledHtml;
-        document.body.appendChild(tempDiv);
-
-        try {
-            const opt = {
-                margin: [8, 6, 8, 6],
-                filename,
-                image: { type: "jpeg", quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true, logging: false },
-                jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-            };
-            // @ts-ignore
-            await globalHtml2Pdf().set(opt).from(tempDiv).save();
-            return;
-        } finally {
-            tempDiv.remove();
-        }
-    }
-
-    // 2. Yedek: Tarayıcının yerel yazdırma penceresini aç
-    const printFrame = document.createElement("iframe");
-    printFrame.style.position = "fixed";
-    printFrame.style.right = "0";
-    printFrame.style.bottom = "0";
-    printFrame.style.width = "0";
-    printFrame.style.height = "0";
-    printFrame.style.border = "0";
-    document.body.appendChild(printFrame);
-
-    printFrame.srcdoc = styledHtml;
-    printFrame.onload = () => {
-        setTimeout(() => {
-            try {
-                printFrame.contentWindow?.focus();
-                printFrame.contentWindow?.print();
-            } finally {
-                setTimeout(() => printFrame.remove(), 1000);
-            }
-        }, 300);
-    };
+function downloadInvoiceHtmlFile(rawHtml: string, filename: string): void {
+    const blob = new Blob([rawHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+    }, 1500);
 }
 
 interface InvoiceItemState {
@@ -1047,7 +1024,7 @@ async function previewInvoiceHtml(uuid: string, onayDurumu: string | boolean = "
         state.currentPreviewHtml = html;
         const iframe = document.getElementById("previewIframe") as HTMLIFrameElement;
         if (iframe) {
-            iframe.srcdoc = html;
+            iframe.srcdoc = formatInvoiceHtmlForA4Preview(html);
         }
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1056,76 +1033,6 @@ async function previewInvoiceHtml(uuid: string, onayDurumu: string | boolean = "
         if (item) {
             showDraftDetailModal(item as Record<string, unknown>);
         }
-    } finally {
-        if (overlay) overlay.classList.add("d-none");
-    }
-}
-
-// Doğrudan PDF İndir (UUID veya Belge No ile)
-async function downloadInvoicePdf(uuid: string, onayDurumu: string = "Onaylanmadı", belgeNo?: string): Promise<void> {
-    if (!state.token) {
-        showToast("PDF indirmek için lütfen giriş yapınız.", "warning");
-        return;
-    }
-
-    const overlay = document.getElementById("previewLoadingOverlay");
-    const overlayText = document.getElementById("previewLoadingText");
-    if (overlay) overlay.classList.remove("d-none");
-    if (overlayText) overlayText.textContent = "Fatura HTML verisi GİB'den alınıyor...";
-
-    showToast("PDF hazırlanıyor, lütfen bekleyin...", "info");
-
-    try {
-        const client = getGibClient(state.env);
-        const isSigned = onayDurumu === "Onaylandı";
-        const html = await client.getInvoiceHTML(state.token, uuid, isSigned);
-        if (!html) throw new Error("GİB'den fatura HTML verisi alınamadı.");
-
-        const filename = `fatura-${belgeNo || uuid}.pdf`;
-        if (overlayText) overlayText.textContent = "PDF dosyası oluşturuluyor...";
-        await generatePdfFromHtml(html, filename);
-
-        showToast(`PDF başarıyla indirildi: ${filename}`, "success");
-    } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        showToast(`PDF İndirme Hatası: ${msg}`, "danger");
-    } finally {
-        if (overlay) overlay.classList.add("d-none");
-    }
-}
-
-// Önizleme Modalındaki İçeriği Doğrudan PDF İndir
-async function downloadCurrentPreviewPdf(): Promise<void> {
-    if (state.currentPreviewUuid && state.token) {
-        await downloadInvoicePdf(
-            state.currentPreviewUuid,
-            state.currentPreviewSigned ? "Onaylandı" : "Onaylanmadı",
-            state.currentPreviewBelgeNo || undefined
-        );
-        return;
-    }
-
-    // Yerel Taslak Önizlemesi ise (veya henüz kaydedilmemişse)
-    const iframe = document.getElementById("previewIframe") as HTMLIFrameElement;
-    const html = state.currentPreviewHtml || iframe?.srcdoc;
-    if (!html) {
-        showToast("İndirilecek önizleme içeriği bulunamadı.", "warning");
-        return;
-    }
-
-    const overlay = document.getElementById("previewLoadingOverlay");
-    const overlayText = document.getElementById("previewLoadingText");
-    if (overlay) overlay.classList.remove("d-none");
-    if (overlayText) overlayText.textContent = "Taslak PDF formatına dönüştürülüyor...";
-
-    showToast("Taslak PDF hazırlanıyor...", "info");
-    try {
-        const filename = "fatura-taslak.pdf";
-        await generatePdfFromHtml(html, filename);
-        showToast("Taslak PDF başarıyla indirildi!", "success");
-    } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        showToast(`PDF Dönüştürme Hatası: ${msg}`, "danger");
     } finally {
         if (overlay) overlay.classList.add("d-none");
     }
@@ -1140,7 +1047,8 @@ function openPreviewInNewTab(): void {
         return;
     }
 
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const a4Html = formatInvoiceHtmlForA4Preview(html);
+    const blob = new Blob([a4Html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank");
 }
@@ -1364,36 +1272,27 @@ function renderInvoicesTable(): void {
         // İşlem Butonları
         let actionButtons = "";
         if (isDeleted) {
-            // Silinmiş belgeler
+            // Silinmiş belgeler: Görüntüle
             actionButtons = `
-                <button class="btn btn-outline-secondary btn-action-view" data-uuid="${ettn}" data-onay="Silinmiş" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML)">
+                <button class="btn btn-outline-secondary btn-action-view" data-uuid="${ettn}" data-onay="Silinmiş" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML / A4)">
                     <i class="bi bi-eye"></i>
-                </button>
-                <button class="btn btn-action-pdf" data-uuid="${ettn}" data-onay="Silinmiş" data-belgeno="${rawBelgeNo}" title="Doğrudan PDF İndir">
-                    <i class="bi bi-file-earmark-pdf"></i>
                 </button>
             `;
         } else if (isSigned) {
-            // Onaylı (İmzalı) belgeler: Görüntüle, Doğrudan PDF İndir, ZIP İndir
+            // Onaylı (İmzalı) belgeler: Görüntüle, ZIP İndir
             actionButtons = `
-                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylandı" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML)">
-                    <i class="bi bi-eye"></i>
-                </button>
-                <button class="btn btn-action-pdf" data-uuid="${ettn}" data-onay="Onaylandı" data-belgeno="${rawBelgeNo}" title="Doğrudan PDF İndir">
-                    <i class="bi bi-file-earmark-pdf"></i> PDF
+                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylandı" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML / A4)">
+                    <i class="bi bi-eye me-1"></i> Görüntüle
                 </button>
                 <a href="${getGibClient(state.env).getDownloadURL(state.token || '', ettn, true)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary" title="ZIP İndir (Resmi GİB)" download="fatura-${rawBelgeNo || ettn}.zip">
                     <i class="bi bi-download"></i>
                 </a>
             `;
         } else {
-            // Aktif taslak (Onaylanmadı): Görüntüle, Doğrudan PDF İndir, Onayla, Sil
+            // Aktif taslak (Onaylanmadı): Görüntüle, Onayla, Sil
             actionButtons = `
-                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylanmadı" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML)">
-                    <i class="bi bi-eye"></i>
-                </button>
-                <button class="btn btn-action-pdf" data-uuid="${ettn}" data-onay="Onaylanmadı" data-belgeno="${rawBelgeNo}" title="Doğrudan PDF İndir">
-                    <i class="bi bi-file-earmark-pdf"></i> PDF
+                <button class="btn btn-outline-primary btn-action-view" data-uuid="${ettn}" data-onay="Onaylanmadı" data-belgeno="${rawBelgeNo}" title="Görüntüle (HTML / A4)">
+                    <i class="bi bi-eye me-1"></i> Görüntüle
                 </button>
                 <button class="btn btn-outline-success btn-action-sign" data-uuid="${ettn}" title="İmzala (Onayla)">
                     <i class="bi bi-check-lg"></i>
@@ -1467,23 +1366,6 @@ function renderInvoicesTable(): void {
             const btn = (e.target as HTMLElement).closest(".btn-action-view") as HTMLElement;
             if (btn && btn.dataset.uuid) {
                 previewInvoiceHtml(btn.dataset.uuid, btn.dataset.onay || "Onaylanmadı", btn.dataset.belgeno);
-            }
-        });
-    });
-
-    // 2.1 Doğrudan PDF İndir Dinleyicisi
-    tbody.querySelectorAll(".btn-action-pdf").forEach((el) => {
-        el.addEventListener("click", async (e) => {
-            const btn = (e.target as HTMLElement).closest(".btn-action-pdf") as HTMLButtonElement;
-            if (!btn || !btn.dataset.uuid) return;
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span>`;
-            try {
-                await downloadInvoicePdf(btn.dataset.uuid, btn.dataset.onay || "Onaylanmadı", btn.dataset.belgeno);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
             }
         });
     });
@@ -1696,7 +1578,7 @@ function showLocalInvoicePreview(payload: InvoicePayload): void {
 
     const iframe = document.getElementById("previewIframe") as HTMLIFrameElement;
     if (iframe) {
-        iframe.srcdoc = previewHtml;
+        iframe.srcdoc = formatInvoiceHtmlForA4Preview(previewHtml);
     }
     const modalEl = document.getElementById("previewModal");
     if (modalEl) new bootstrap.Modal(modalEl).show();
@@ -2590,11 +2472,19 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Modal İçinden PDF İndir Butonu
-    const btnDownloadPdfModal = document.getElementById("btnDownloadPdfFromPreview");
-    if (btnDownloadPdfModal) {
-        btnDownloadPdfModal.addEventListener("click", async () => {
-            await downloadCurrentPreviewPdf();
+    // Modal İçinden Orijinal HTML İndir Butonu
+    const btnDownloadHtmlModal = document.getElementById("btnDownloadHtmlFromPreview");
+    if (btnDownloadHtmlModal) {
+        btnDownloadHtmlModal.addEventListener("click", () => {
+            const iframe = document.getElementById("previewIframe") as HTMLIFrameElement;
+            const html = state.currentPreviewHtml || iframe?.srcdoc;
+            if (!html) {
+                showToast("İndirilecek HTML içeriği bulunamadı.", "warning");
+                return;
+            }
+            const filename = `fatura-${state.currentPreviewBelgeNo || state.currentPreviewUuid || "taslak"}.html`;
+            downloadInvoiceHtmlFile(html, filename);
+            showToast(`Orijinal HTML dosyası indirildi: ${filename}`, "success");
         });
     }
 

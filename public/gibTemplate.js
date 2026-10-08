@@ -151,8 +151,8 @@ export function generateGibInvoiceHtml(payload, userData, fallbackUserCode, fall
             </tr>
         `;
     }).join("");
-    // GİB standardında sayfa dolgusu için boş satırlar ekle (en az 14 satır)
-    const fillerRowCount = Math.max(0, 14 - (payload.items?.length || 0));
+    // GİB standardında sayfa dolgusu için boş satırlar ekle
+    const fillerRowCount = Math.max(0, 4 - (payload.items?.length || 0));
     let fillerRowsHtml = "";
     for (let i = 0; i < fillerRowCount; i++) {
         fillerRowsHtml += `

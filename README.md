@@ -3,9 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Privacy: Fully Local](https://img.shields.io/badge/Privacy-Fully%20Local-success)](#)
+[![Canlı Uygulama](https://img.shields.io/badge/Canlı%20Uygulama-Netlify-00C7B7?logo=netlify&logoColor=white)](https://better-earsiv-fatura.netlify.app/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
 Gelir İdaresi Başkanlığı (GİB) e-Arşiv Portalı için geliştirilmiş, hafif, hızlı, modern ve **%100 istemci tabanlı (client-side)** bir web arayüzüdür.
+
+Uygulamayı herhangi bir kurulum yapmadan doğrudan tarayıcınızda kullanabilirsiniz:  
+**[https://better-earsiv-fatura.netlify.app/](https://better-earsiv-fatura.netlify.app/)**
 
 GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadeleştirerek kullanıcı dostu ve akıcı bir deneyim sunar.
 
@@ -27,9 +31,8 @@ GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadele
 - **Fatura Klonlama:** Önizlenen veya listedeki bir faturayı tek tıkla form alanlarına kopyalayarak yeni fatura oluşturabilme.
 
 ### Belge ve İndirme İşlemleri
-- **Doğrudan PDF İndirme:** Faturayı resmi A4 formatında PDF olarak tarayıcı üzerinden anında indirme.
-- **ZIP İndirme:** Faturayı GİB'in resmi ZIP formatında indirip arşivleme.
-- **HTML Önizleme ve Yazdırma:** GİB resmi şablonuyla fatura çıktısını modal içerisinde görüntüleme veya yazdırma.
+- **HTML Önizleme ve Yazdırma:** GİB resmi şablonuyla fatura çıktısını modal içerisinde görüntüleme, tarayıcı üzerinden yazdırma veya PDF olarak kaydetme.
+- **HTML ve ZIP İndirme:** Faturayı resmi ZIP formatında veya doğrudan HTML dosyası olarak indirme.
 - **Taslak Kaydetme ve İmzalama:** Resmi maliyet doğurmadan taslak oluşturma veya portal oturumuyla doğrudan imzalama.
 - **Taslak İptali:** İptal gerekçesi girerek onaylanmamış taslakları portaldan silebilme.
 
@@ -51,34 +54,34 @@ GİB portalındaki fatura düzenleme, sorgulama ve imzalama süreçlerini sadele
 
 ## Kurulum ve Çalıştırma
 
+> Kurulum yapmadan doğrudan kullanmak isterseniz yayındaki sürümü ziyaret edebilirsiniz: **[https://better-earsiv-fatura.netlify.app/](https://better-earsiv-fatura.netlify.app/)**
+
 ### Gereksinimler
-- Node.js (v18 veya üzeri)
-- npm
+- Bilgisayarınızda **[Node.js](https://nodejs.org/)** (v18 veya üzeri) kurulu olmalıdır.
 
-### 1. Bağımlılıkları Yükleyin
-```bash
-npm install
-```
+### Adım Adım Kurulum
 
-### 2. Projeyi Derleyin
-```bash
-npm run build
-```
+1. **Projeyi İndirin:** Bu sayfadaki **Code > Download ZIP** seçeneğiyle projeyi indirin (veya `git clone` yapın) ve bir klasöre çıkartın.
+2. **Terminali Açın:** Proje klasöründe komut satırını / terminali açın.
+3. **Bağımlılıkları Yükleyin:**
+   ```bash
+   npm install
+   ```
+4. **Projeyi Derleyin:**
+   ```bash
+   npm run build
+   ```
+5. **Uygulamayı Başlatın:**
+   ```bash
+   npm start
+   ```
 
-Bu komut TypeScript kodlarını doğrudan tarayıcıda çalışan JavaScript dosyalarına derler.
-
-### 3. Çalıştırın
-```bash
-npm start
-```
-
-Tarayıcınızda açmak için:
+Başlatma işleminden sonra tarayıcınızda açın:  
 [http://localhost:3000](http://localhost:3000)
 
-Geliştirme sırasında otomatik izleme (watch) için:
-```bash
-npm run watch
-```
+GİB kullanıcı kodu ve şifrenizle giriş yaparak doğrudan kullanmaya başlayabilirsiniz.
+
+> **İpucu:** Uygulamayı kapatmak için terminalde `Ctrl + C` tuşlarına basabilirsiniz. Daha sonra tekrar çalıştırmak istediğinizde sadece `npm start` komutunu vermeniz yeterlidir. Geliştirme sürecinde otomatik derleme için `npm run watch` kullanılabilir.
 
 ---
 
@@ -107,8 +110,3 @@ better-earsiv/
 - **Kimlik Bilgileri Saklanmaz:** GİB kullanıcı kodunuz ve parolanız hiçbir veritabanına kaydedilmez. Bilgiler yalnızca ilgili tarayıcı sekmesi boyunca oturum belleğinde (`sessionStorage`) tutulur.
 - **Resmi İşlem Sorumluluğu:** Canlı (PROD) portalda imzalanan belgeler yasal olarak geçerli e-Arşiv faturalarıdır. İşlem yaparken doğru ortamda olduğunuza dikkat ediniz.
 
----
-
-## Lisans
-
-Bu proje MIT Lisansı ile lisanslanmıştır.
